@@ -81,6 +81,17 @@ Use your actual Atlas hostname. Percent-encode reserved characters in username/p
 
 Distinguish DNS/allowlist issues from credentials/authSource or missing privileges. Never post credential-bearing URIs in screenshots. [Atlas troubleshooting](https://www.mongodb.com/docs/atlas/troubleshoot-connection/)
 
+If Render builds successfully but the API exits at startup, use the startup diagnostic's phase and MongoDB error code:
+
+| Diagnostic | Action |
+| --- | --- |
+| Authentication failed | Check the `status_pulse_app` database-user password in `MONGODB_URI`, encode reserved characters once, and retain `authSource=admin`. |
+| Code 13: permission denied | Set `MONGODB_DATABASE=status_pulse` and verify the user has `readWrite` on `status_pulse`. |
+| Connection unavailable | Verify the cluster hostname and add the service's **Connect > Outbound** ranges to Atlas's IP access list. |
+| Code 85/86: index conflict, or 11000: duplicate records | Review existing indexes/data before applying a migration; do not erase the database. |
+
+Save corrected environment values in Render and redeploy. Startup diagnostics omit raw database messages and credentials, so the diagnostic line can be shared without copying the environment settings. A successful build alone does not verify the database connection.
+
 ## Shared/test services
 
 Validate before publishing:

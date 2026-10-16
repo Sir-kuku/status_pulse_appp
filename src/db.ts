@@ -1,5 +1,6 @@
 import { MongoClient, type Db, type IndexDescription } from 'mongodb';
 import type { AppContext, Config } from './core.js';
+import { DatabaseStartupError } from './startup-error.js';
 
 // Every index is named: migrations are safe to re-run and uniqueness is enforced by MongoDB.
 const indexes: Record<string, IndexDescription[]> = {
@@ -34,12 +35,18 @@ export async function migrate(db: Db): Promise<void> {
 }
 export async function connect(config: Config): Promise<AppContext> {
   const client = new MongoClient(config.mongoUri, { serverSelectionTimeoutMS: 10000, maxPoolSize: 20 });
+  let phase: ConstructorParameters<typeof DatabaseStartupError>[0] = 'connecting';
   try {
     await client.connect();
     const db = client.db(config.database);
+    phase = 'checking replica set';
     const hello = await db.command({ hello: 1 });
     if (!hello.setName && hello.msg !== 'isdbgrid') throw new Error('Status Pulse requires a MongoDB replica set for transactions. Use Atlas or npm run dev:db.');
+    phase = 'creating indexes';
     await migrate(db);
     return { client, db, config, now: () => new Date() };
-  } catch (error) { await client.close(); throw error; }
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw new DatabaseStartupError(phase, error);
+  }
 }

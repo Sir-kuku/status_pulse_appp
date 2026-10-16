@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { connect } from './db.js';
+import { describeStartupError } from './startup-error.js';
 
 async function main() {
   const config = loadConfig();
@@ -17,6 +18,6 @@ async function main() {
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
 }
 main().catch(error => {
-  console.error(`API startup failed (${error?.constructor?.name ?? 'Error'}). Check database connectivity, replica set configuration, and environment settings.`);
+  console.error(`API startup failed: ${describeStartupError(error)}`);
   process.exitCode = 1;
 });

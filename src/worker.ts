@@ -4,6 +4,7 @@ import { loadConfig } from './config.js';
 import { connect } from './db.js';
 import { scheduleDue, runNextCheck, expireOverridesAndRecordStale } from './monitoring.js';
 import { deliverPendingAlerts } from './delivery.js';
+import { describeStartupError } from './startup-error.js';
 
 async function main() {
   const ctx = await connect(loadConfig());
@@ -34,4 +35,4 @@ async function main() {
     process.disconnect?.();
   }
 }
-main().catch(error => { console.error(`Worker startup failed (${error?.constructor?.name ?? 'Error'}). Check database and environment settings.`); process.exitCode = 1; });
+main().catch(error => { console.error(`Worker startup failed: ${describeStartupError(error)}`); process.exitCode = 1; });
