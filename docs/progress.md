@@ -11,7 +11,7 @@ Scope: weeks 1–4 only. Weeks 5–6 remain deferred. Local verification date: 1
 
 ## Verification
 
-- Automated tests exercise account/session lifecycle, project isolation, invitation acceptance, role gates, concurrent edits, endpoint safety, DNS pinning, HTTP timeout/redirect behavior, worker leases/retries, incidents, visibility, subscriptions, alerts and payments.
+- All **32 automated tests passed**, with no failures, cancellations, or skips. They exercise account/session lifecycle, project isolation, invitation acceptance, role gates, concurrent edits, endpoint safety, DNS pinning, HTTP timeout/redirect behavior, worker leases/retries, incidents, visibility, subscriptions, alerts and payments.
 - `npm run demo` passed all 10 acceptance scenarios using a fresh isolated MongoDB replica set and controlled check outcomes. Results: [local-demo.json](evidence/local-demo.json).
 - `npm run local` started a persistent local replica set, API, and separate worker. The worker scheduled and saved a real successful HTTP 200 observation. API readiness and the public HTML demo page responded successfully. Results: [local-runtime.json](evidence/local-runtime.json).
 - `npm run contract` validated OpenAPI 3.0.3 with 40 documented paths. The contract is served at `/api/openapi.json` and can be imported into Postman.
