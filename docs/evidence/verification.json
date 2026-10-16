@@ -8,5 +8,6 @@
   "acceptanceDemoScenariosPassed": 10,
   "localApiAndIndependentWorkerVerified": true,
   "hostedDeploymentVerified": false,
-  "dockerBuildVerified": false
+  "dockerBuildVerified": true,
+  "githubActionsVerification": "https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704"
 }

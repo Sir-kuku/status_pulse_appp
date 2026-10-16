@@ -2,17 +2,26 @@
 
 ## Delivery status
 
-A runtime image definition and local Compose stack are included. **No hosted URL, remote worker, or hosted database has been provisioned or verified by this document.** Docker was unavailable in the development workspace, so image/Compose execution remains to be checked. Deployment is complete only after verification succeeds in the target environment.
+A runtime image definition and local Compose stack are included. **No hosted URL or remote worker has been provisioned or verified by this document.** GitHub Actions [run 38935236704](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed the tests, contract validation, compilation, Compose configuration validation, and Docker image build. Docker/Compose were not executed locally. Deployment is complete only after verification succeeds in the target environment.
 
 ## GitHub and Render
 
 The user-selected deployment target is GitHub plus Render. The root `render.yaml` defines a Free web API and a separate **paid** background worker using the `0.5c-512mb` compute plan. Review the displayed charge before creating that worker. Render has no free background-worker plan. Its Free web service can spin down when idle, so the first request after inactivity can be delayed. The paid worker continues monitoring independently. No paid service has been created here. [Render free-service limits](https://render.com/docs/free), [compute plans](https://render.com/docs/compute-plans)
 
-1. Push the reviewed project to the chosen GitHub repository's `main` branch. The included GitHub Actions workflow runs tests and builds the runtime image.
-2. In Render, create a Blueprint from that repository and review the two service definitions before applying them. Their deployment trigger is `checksPass`, which requires passing GitHub checks for automatic updates. [Blueprint reference](https://render.com/docs/blueprint-spec)
-3. Enter the secret Atlas `MONGODB_URI` for **both** services, using database `status_pulse` and account `status_pulse_app`. Keep it in Render's environment settings. Enter the API's HTTPS address as `PUBLIC_BASE_URL` for both services; update it if Render assigns a different hostname.
-4. Add the outbound IP ranges shown for both Render services to the Atlas IP Access List. Keep the database user limited to the project database.
-5. Deploy, then verify `/health/ready`, `/docs`, registration, and persisted scheduled check results. Record the deployed URL and worker evidence below. An HTTP health check alone does not prove monitoring is running.
+1. The project is available in [Sir-kuku/status_pulse_appp](https://github.com/Sir-kuku/status_pulse_appp), branch `main`. Open its **Actions** tab and confirm the **Backend checks** workflow is green for the version you are deploying.
+2. In the [Render dashboard](https://dashboard.render.com), select **New > Blueprint**. Connect your GitHub account if needed, grant Render access to this repository, and select **Connect** beside `status_pulse_appp`. Use Blueprint name `status-pulse`, branch `main`, and Blueprint path `render.yaml`. Select the repository through the GitHub integration so automatic deployments and check results are available. [Blueprint setup](https://render.com/docs/infrastructure-as-code)
+3. Review the two resources: `status-pulse-api` (Free) and `status-pulse-worker` (paid). The file already specifies Docker, region, commands, and health check. Do not add npm build/start commands. Their `checksPass` trigger deploys updates after GitHub checks pass. [Blueprint reference](https://render.com/docs/blueprint-spec)
+4. Render asks for two values for **each service**. Set `MONGODB_URI` to the Atlas URI below with your database-user password percent-encoded. Keep the actual URI in Render's environment settings. Set `PUBLIC_BASE_URL` temporarily to `https://example.invalid` because the actual hostname is not assigned yet. This temporary value must be replaced in step 6. The other variables are supplied by the Blueprint.
+
+   ```text
+   mongodb+srv://status_pulse_app:ENCODED_PASSWORD@cluster0.t9tey8e.mongodb.net/status_pulse?retryWrites=true&w=majority&authSource=admin
+   ```
+
+   Use the password created for `status_pulse_app`, not your Atlas website login. Replace only `ENCODED_PASSWORD`; do not include angle brackets. Percent-encode reserved characters (for example, `@` becomes `%40`). Never commit or post the completed URI.
+
+5. After reviewing the displayed worker cost, click **Deploy Blueprint**. Open each created service, choose **Connect > Outbound**, and copy all displayed IP ranges (including their `/...` suffixes). In Atlas, go to **Database & Network Access > IP Access List > Add IP Address**, add those ranges, and wait until active. Both services are in Frankfurt and may show the same ranges; identical entries only need adding once. [Render outbound IP instructions](https://render.com/docs/outbound-ip-addresses)
+6. Copy the actual `https://...onrender.com` address displayed on the **API** service. In the **Environment** settings of both the API and worker, replace `PUBLIC_BASE_URL` with that API address. Save and redeploy. If initial startup failed before Atlas access was ready, use **Manual Deploy > Deploy latest commit** on both services after the IP entries are active. The worker uses the API's address and has no public website URL of its own.
+7. Open the API address followed by `/health/ready` (expect `{"status":"ready"}`) and `/docs`. The worker logs should show `Status Pulse scheduler and check worker started.` Register/create a project and service through the API and confirm new scheduled results appear; this verifies the worker beyond startup. Local demo accounts and data are not automatically copied to Atlas. Record the deployed URL and worker evidence below.
 
 The API runs `node dist/src/server.js`; the worker runs `node dist/src/worker.js`. Both connect to the same Atlas database. Public status pages use `/status/PROJECT-SLUG`.
 

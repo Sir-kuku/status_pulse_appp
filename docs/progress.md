@@ -21,11 +21,11 @@ Run `npm run check` for typechecking, contract validation, automated tests, and 
 
 ## Remaining deployment work
 
-The configured Git remote is `https://github.com/Sir-kuku/status_pulse_app.git`. Access verification returned **Repository not found**; the repository may need to be created, its URL corrected, or the correct GitHub account authenticated. No successful push or remote CI run is claimed.
+The corrected Git remote is [Sir-kuku/status_pulse_appp](https://github.com/Sir-kuku/status_pulse_appp). The project is present on `main`, and [GitHub Actions run 38935236704](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed tests, contract validation, compilation, Compose configuration validation, and the Docker image build.
 
-`render.yaml` and `.github/workflows/ci.yml` are ready for review. The Render design uses a Free API and a separate paid background worker. No paid resources have been created. Once GitHub access and the worker plan are settled, enter the Atlas secret in Render, allow the services' outbound addresses in Atlas, deploy, and record hosted API/worker evidence. See [deployment.md](deployment.md).
+The user will deploy through their own Render dashboard using the steps in [deployment.md](deployment.md). The prepared Blueprint uses a Free API and a separate paid background worker; review its price in Render before provisioning. No Render services have been created by the assistant. Enter the Atlas secret, allow the services' outbound addresses in Atlas, set the assigned API URL, deploy, and record hosted API/worker evidence.
 
-Docker is not installed in this workspace, so container build and Compose execution have not been verified locally. GitHub CI includes those checks. Email and payments remain explicit simulations: no real mail is sent and no money is charged.
+Docker is not installed in this workspace. The image build and Compose configuration were verified in GitHub CI; the Compose stack has not been started locally or in CI. Email and payments remain explicit simulations: no real mail is sent and no money is charged.
 
 ## Running and reviewing
 
