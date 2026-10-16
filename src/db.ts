@@ -29,9 +29,13 @@ const indexes: Record<string, IndexDescription[]> = {
 };
 export async function migrate(db: Db): Promise<void> {
   for (const [name, specs] of Object.entries(indexes)) {
-    await db.collection(name).createIndexes(specs);
+    try {
+      await db.collection(name).createIndexes(specs);
+    } catch (error) { throw new DatabaseStartupError(`creating indexes for ${name}`, error); }
   }
-  await db.collection('migrations').updateOne({ name: '001_initial_indexes' }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
+  try {
+    await db.collection('migrations').updateOne({ name: '001_initial_indexes' }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
+  } catch (error) { throw new DatabaseStartupError('recording migration', error); }
 }
 export async function connect(config: Config): Promise<AppContext> {
   const client = new MongoClient(config.mongoUri, { serverSelectionTimeoutMS: 10000, maxPoolSize: 20 });
@@ -47,6 +51,7 @@ export async function connect(config: Config): Promise<AppContext> {
     return { client, db, config, now: () => new Date() };
   } catch (error) {
     await client.close().catch(() => undefined);
+    if (error instanceof DatabaseStartupError) throw error;
     throw new DatabaseStartupError(phase, error);
   }
 }

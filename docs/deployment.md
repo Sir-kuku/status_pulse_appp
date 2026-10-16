@@ -90,7 +90,9 @@ If Render builds successfully but the API exits at startup, use the startup diag
 | Connection unavailable | Verify the cluster hostname and add the service's **Connect > Outbound** ranges to Atlas's IP access list. |
 | Code 85/86: index conflict, or 11000: duplicate records | Review existing indexes/data before applying a migration; do not erase the database. |
 
-Save corrected environment values in Render and redeploy. Startup diagnostics omit raw database messages and credentials, so the diagnostic line can be shared without copying the environment settings. A successful build alone does not verify the database connection.
+Atlas code `8000` is shared by different failures. Its diagnostic includes a sanitized Atlas explanation and the collection whose indexes were being created; use that explanation to distinguish permissions, quotas, or command restrictions. Recording the migration result is reported as a separate step.
+
+Save corrected environment values in Render and redeploy. Startup diagnostics redact connection strings, credentials, and command/document bodies; share the diagnostic line without copying environment settings. A successful build alone does not verify the database connection.
 
 ## Shared/test services
 

@@ -83,7 +83,7 @@ A successful response means the API can reach its database. To verify the worker
 
 Tests/demo are isolated from the persistent development database. The first test run may download MongoDB. A controlled test transport is not a production URL-validation bypass. GitHub Actions runs checks and builds the container; the workflow file alone does not prove a remote run passed.
 
-Verification recorded on 16 October 2026: 36 tests and 10 acceptance demo scenarios passed, TypeScript and all 40 OpenAPI paths validated, and the build succeeded. The persistent local API and independent worker were also verified with a stored HTTP 200 check and a public page at `/status/local-demo`. The earlier [GitHub Actions run](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed its checks, Compose validation, and Docker image build. Hosted deployment has not yet been verified.
+Verification recorded on 16 October 2026: 38 tests and 10 acceptance demo scenarios passed, TypeScript and all 40 OpenAPI paths validated, and the build succeeded. The persistent local API and independent worker were also verified with a stored HTTP 200 check and a public page at `/status/local-demo`. The earlier [GitHub Actions run](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed its checks, Compose validation, and Docker image build. Hosted deployment has not yet been verified.
 
 Run `npm run demo` to regenerate detailed acceptance evidence at `.local/verification/demo.json`. Generated results stay out of source control; save the latest report with your assessment submission when needed.
 

@@ -1,7 +1,7 @@
 import { MongoNetworkError, MongoParseError, MongoServerError, MongoServerSelectionError } from 'mongodb';
 import { ZodError } from 'zod';
 
-type DatabaseStartupPhase = 'connecting' | 'checking replica set' | 'creating indexes';
+type DatabaseStartupPhase = 'connecting' | 'checking replica set' | 'creating indexes' | `creating indexes for ${string}` | 'recording migration';
 
 export class DatabaseStartupError extends Error {
   constructor(readonly phase: DatabaseStartupPhase, cause: unknown) {
@@ -9,8 +9,27 @@ export class DatabaseStartupError extends Error {
   }
 }
 
-// Never log raw database messages: they can contain credentials, commands, or document values.
-export function describeStartupError(error: unknown): string {
+function sanitizeAtlasMessage(message: string, mongoUri?: string): string {
+  let detail = message.replace(/mongodb(?:\+srv)?:\/\/[^\s"'<>]+/gi, '[redacted URI]');
+  if (mongoUri) {
+    detail = detail.split(mongoUri).join('[redacted URI]');
+    try {
+      const uri = new URL(mongoUri);
+      for (const encoded of [uri.username, uri.password]) {
+        if (!encoded) continue;
+        detail = detail.split(encoded).join('[redacted credential]');
+        detail = detail.split(decodeURIComponent(encoded)).join('[redacted credential]');
+      }
+    } catch { /* A malformed URI must not prevent reporting the startup failure. */ }
+  }
+  // Keep Atlas's explanation, omitting URI credentials, quoted values and command/document bodies.
+  detail = detail.replace(/\b(?:dup key|keyValue)\s*:[\s\S]*$/i, '[document values omitted]');
+  detail = detail.replace(/\{[\s\S]*$/, '[command details omitted]');
+  detail = detail.replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, '[quoted value omitted]');
+  return detail.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 600);
+}
+
+export function describeStartupError(error: unknown, mongoUri = process.env.MONGODB_URI): string {
   const phase = error instanceof DatabaseStartupError ? ` during ${error.phase}` : '';
   const cause = error instanceof DatabaseStartupError ? error.cause : error;
   if (cause instanceof MongoServerError) {
@@ -27,6 +46,9 @@ export function describeStartupError(error: unknown): string {
     }
     if (code === 11000) {
       return `${label}. Existing data conflicts with a unique index. Review duplicate records before retrying startup.`;
+    }
+    if (code === 8000) {
+      return `${label}. Atlas explanation: ${sanitizeAtlasMessage(cause.message, mongoUri)}`;
     }
     return `${label}. MongoDB rejected a startup command. Use this error code and phase to check database access, limits, and index configuration.`;
   }

@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { MongoNetworkError, MongoParseError, MongoServerError } from 'mongodb';
 import { z } from 'zod';
 import { DatabaseStartupError, describeStartupError } from '../src/startup-error.js';
+import { migrate } from '../src/db.js';
+import type { Db } from 'mongodb';
 
 test('startup diagnostics distinguish authentication from authorization and retain the failing phase', () => {
   const authentication = describeStartupError(new DatabaseStartupError('connecting', new MongoServerError({ code: 18, message: 'Authentication failed' })));
@@ -51,4 +53,29 @@ test('startup diagnostics never print raw messages, connection credentials, docu
       assert.ok(diagnostic.length > 20);
     }
   }
+});
+
+test('Atlas explanations identify the actual rejected action or quota while redacting credentials and documents', () => {
+  const authorization = describeStartupError(new DatabaseStartupError('creating indexes for users', new MongoServerError({
+    code: 8000, message: 'user is not allowed to do action [createIndex] on [status_pulse.users]',
+  })));
+  assert.match(authorization, /creating indexes for users/);
+  assert.match(authorization, /not allowed to do action \[createIndex\]/);
+  const quota = describeStartupError(new MongoServerError({ code: 8000, message: 'you are over your space quota' }));
+  assert.match(quota, /over your space quota/);
+  const uri = 'mongodb+srv://private-user:hidden%40password@example.com/status_pulse';
+  const privateMessage = `not authorized: private-user hidden@password hidden%40password ${uri} mongodb://other-user:other-secret@example.net/db command { token: private-document-value }`;
+  const redacted = describeStartupError(new MongoServerError({ code: 8000, message: privateMessage }), uri);
+  assert.match(redacted, /not authorized/);
+  assert.doesNotMatch(redacted, /private-user|hidden|other-user|other-secret|example\.(com|net)|private-document-value/);
+  const duplicate = describeStartupError(new MongoServerError({ code: 8000, message: 'dup key: private-document-value' }));
+  assert.doesNotMatch(duplicate, /private-document-value/);
+});
+
+test('migration failures identify the collection or migration record without losing the server error', async () => {
+  const serverError = new MongoServerError({ code: 8000, message: 'action not allowed' });
+  const indexFailureDb = { collection: (name: string) => ({ createIndexes: async () => { if (name === 'sessions') throw serverError; } }) } as unknown as Db;
+  await assert.rejects(migrate(indexFailureDb), error => error instanceof DatabaseStartupError && error.phase === 'creating indexes for sessions' && error.cause === serverError);
+  const recordFailureDb = { collection: () => ({ createIndexes: async () => [], updateOne: async () => { throw serverError; } }) } as unknown as Db;
+  await assert.rejects(migrate(recordFailureDb), error => error instanceof DatabaseStartupError && error.phase === 'recording migration' && error.cause === serverError);
 });
