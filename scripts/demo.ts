@@ -98,7 +98,7 @@ try {
   await ctx.db.collection('users').updateOne({ _id: new ObjectId(owner.user._id) }, { $set: { platformRole: 'admin' } });
   await api('GET', '/api/admin/operations', undefined, owner.token);
   pass('Stale results become unknown and administration is restricted');
-  await mkdir('docs/evidence', { recursive: true });
-  await writeFile('docs/evidence/local-demo.json', JSON.stringify({ verifiedAt: new Date().toISOString(), environment: 'isolated local MongoDB replica set', transport: 'controlled checker outcomes; no external endpoint requests', hostedDeploymentVerified: false, scenarios: evidence }, null, 2) + '\n');
-  console.log('Acceptance demo complete. Evidence: docs/evidence/local-demo.json');
+  await mkdir('.local/verification', { recursive: true });
+  await writeFile('.local/verification/demo.json', JSON.stringify({ verifiedAt: new Date().toISOString(), environment: 'isolated local MongoDB replica set', transport: 'controlled checker outcomes; no external endpoint requests', hostedDeploymentVerified: false, scenarios: evidence }, null, 2) + '\n');
+  console.log('Acceptance demo complete. Evidence: .local/verification/demo.json');
 } finally { await new Promise<void>(resolve => server.close(() => resolve())); await close(); }

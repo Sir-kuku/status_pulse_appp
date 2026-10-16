@@ -72,15 +72,20 @@ A successful response means the API can reach its database. To verify the worker
 | npm run dev | API with source reload |
 | npm run dev:worker | Scheduler/worker with source reload |
 | npm run typecheck | TypeScript validation without output |
+| npm run contract | Validate the OpenAPI contract |
 | npm test | Automated tests with isolated replica sets and controlled HTTP transports |
 | npm run build | Compile TypeScript into dist |
-| npm run check | Typecheck, test, and build |
+| npm run check | Typecheck, validate the API contract, test, and build |
 | npm run demo | Deterministic acceptance demo with isolated data; no Atlas credentials |
 | npm start | Compiled API: node dist/src/server.js |
 | npm run worker | Compiled worker: node dist/src/worker.js |
 | npm run admin -- --email existing@example.com | Grant platform administration to an existing account; operator only |
 
 Tests/demo are isolated from the persistent development database. The first test run may download MongoDB. A controlled test transport is not a production URL-validation bypass. GitHub Actions runs checks and builds the container; the workflow file alone does not prove a remote run passed.
+
+Verification recorded on 16 October 2026: 32 tests and 10 acceptance demo scenarios passed, TypeScript and all 40 OpenAPI paths validated, and the build succeeded. The persistent local API and independent worker were also verified with a stored HTTP 200 check and a public page at `/status/local-demo`. [GitHub Actions](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed the checks, Compose validation, and Docker image build. Hosted deployment has not yet been verified.
+
+Run `npm run demo` to regenerate detailed acceptance evidence at `.local/verification/demo.json`. Generated results stay out of source control; save the latest report with your assessment submission when needed.
 
 ## API documentation and first requests
 
@@ -169,12 +174,8 @@ Index migration is rerunnable and also runs during database connection startup. 
 
 ## Design and remaining work
 
-See [verified progress and deployment blockers](docs/progress.md) for the current milestone status and recorded local evidence.
-
 [Requirements](docs/requirements.md) and [week 1 analysis](docs/week-1-analysis.md) contain stories, acceptance criteria, roles, data model, and architecture tradeoffs.
 
 Durable leases and unique keys prevent duplicate authoritative records; transactions keep results/status/incidents/alerts consistent. A crash after sending HTTP can cause a repeated request: the claim is one authoritative stored outcome per job, not universal exactly-once external execution.
 
 Historical resources are archived. The single-node development replica set is not highly available. Simulations are not real provider integrations. Weeks 5–6 and actual hosted verification remain separate work. Docker files are supplied but were not executed in this Windows workspace because no Docker engine was available.
-#   s t a t u s _ p u l s e _ a p p  
- 
