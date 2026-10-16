@@ -1,0 +1,45 @@
+# Review before applying: the background worker uses a PAID Render compute plan.
+# Database credentials are entered in Render, never committed here.
+services:
+  - type: web
+    name: status-pulse-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/ready
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: status_pulse
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ENABLE_SIMULATIONS
+        value: "true"
+  - type: worker
+    name: status-pulse-worker
+    runtime: docker
+    plan: 0.5c-512mb
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node dist/src/worker.js
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DATABASE
+        value: status_pulse
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: WORKER_CONCURRENCY
+        value: "4"
+      - key: ENABLE_SIMULATIONS
+        value: "true"

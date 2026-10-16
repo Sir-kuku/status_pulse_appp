@@ -8,6 +8,10 @@ Email, subscriber verification, and payments are **simulated**. No real email is
 
 ## Run locally
 
+Fastest option after `npm ci`: run `npm run local`, then open **http://localhost:3000/docs**. This starts the isolated persistent database, API, and independent worker together. Ctrl+C stops them and preserves data. The existing Windows MongoDB service and Atlas data are untouched.
+
+Public project pages are available at `/status/PROJECT-SLUG` once the project and its services are public. API definitions can be imported into Postman from `/api/openapi.json`.
+
 Use Node.js 24 and npm. Run commands from the repository root. No Atlas credentials or Docker are needed for the local replica-set option.
 
 Install dependencies:
@@ -30,7 +34,7 @@ In terminal 1, start the persistent development database and leave it running:
 npm run dev:db
 ```
 
-The first start downloads a MongoDB executable and needs internet access. Console output identifies its connection/storage location. A replica set supports the transactions required here; a standalone MongoDB process is insufficient.
+On Windows the helper reuses an installed MongoDB 8.2, 8.0, or 7.0 executable with separate data and port. Otherwise the first start downloads a MongoDB executable and needs internet access. Set MONGOMS_SYSTEM_BINARY to select another compatible executable. Console output identifies its connection/storage location. A replica set supports the transactions required here; a standalone MongoDB process is insufficient.
 
 In terminal 2, create/verify indexes:
 
@@ -63,6 +67,7 @@ A successful response means the API can reach its database. To verify the worker
 | Command | Purpose |
 | --- | --- |
 | npm run dev:db | Persistent local MongoDB replica set |
+| npm run local | Start local database, API, and worker together |
 | npm run migrate | Repeatable initial index migration |
 | npm run dev | API with source reload |
 | npm run dev:worker | Scheduler/worker with source reload |
@@ -73,6 +78,7 @@ A successful response means the API can reach its database. To verify the worker
 | npm run demo | Deterministic acceptance demo with isolated data; no Atlas credentials |
 | npm start | Compiled API: node dist/src/server.js |
 | npm run worker | Compiled worker: node dist/src/worker.js |
+| npm run admin -- --email existing@example.com | Grant platform administration to an existing account; operator only |
 
 Tests/demo are isolated from the persistent development database. The first test run may download MongoDB. A controlled test transport is not a production URL-validation bypass. GitHub Actions runs checks and builds the container; the workflow file alone does not prove a remote run passed.
 
@@ -162,6 +168,8 @@ Fetch current project/service/incident data before editing. Project and incident
 Index migration is rerunnable and also runs during database connection startup. Database constraints enforce unique emails, memberships, job slots/results, alerts, subscriptions, and payment keys. Future schema changes need explicit migrations; do not erase collections to fix an error.
 
 ## Design and remaining work
+
+See [verified progress and deployment blockers](docs/progress.md) for the current milestone status and recorded local evidence.
 
 [Requirements](docs/requirements.md) and [week 1 analysis](docs/week-1-analysis.md) contain stories, acceptance criteria, roles, data model, and architecture tradeoffs.
 

@@ -1,0 +1,50 @@
+{
+  "name": "status-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "config": {
+    "mongodbMemoryServer": {
+      "disablePostinstall": true,
+      "version": "8.0.17"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "dev:db": "tsx scripts/dev-db.ts",
+    "local": "tsx scripts/local.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "worker": "node dist/src/worker.js",
+    "migrate": "tsx scripts/migrate.ts",
+    "admin": "tsx scripts/admin.ts",
+    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
+    "demo": "tsx scripts/demo.ts",
+    "contract": "tsx scripts/check-contract.ts",
+    "check": "npm run typecheck && npm run contract && npm test && npm run build"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "ipaddr.js": "^2.5.0",
+    "mongodb": "^7.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/supertest": "^7.2.1",
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

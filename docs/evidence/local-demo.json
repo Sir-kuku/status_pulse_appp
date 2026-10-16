@@ -1,0 +1,48 @@
+{
+  "verifiedAt": "2026-10-16T16:40:14.090Z",
+  "environment": "isolated local MongoDB replica set",
+  "transport": "controlled checker outcomes; no external endpoint requests",
+  "hostedDeploymentVerified": false,
+  "scenarios": [
+    {
+      "scenario": "Project roles and cross-project privacy",
+      "result": "passed"
+    },
+    {
+      "scenario": "Selected-service subscription with simulated verification",
+      "result": "passed"
+    },
+    {
+      "scenario": "Scheduled healthy checks and recovery threshold",
+      "result": "passed"
+    },
+    {
+      "scenario": "Timeout outage, concurrent scheduling, and incident/alert deduplication",
+      "result": "passed"
+    },
+    {
+      "scenario": "Failed alert retry and separate acknowledgement",
+      "result": "passed"
+    },
+    {
+      "scenario": "Audited manual override and automatic expiry",
+      "result": "passed"
+    },
+    {
+      "scenario": "Healthy recovery evidence, explicit incident lifecycle, and subscriber notifications",
+      "result": "passed"
+    },
+    {
+      "scenario": "Public status excludes private services and configuration",
+      "result": "passed"
+    },
+    {
+      "scenario": "Failed payment leaves plan unchanged; successful retry activates once",
+      "result": "passed"
+    },
+    {
+      "scenario": "Stale results become unknown and administration is restricted",
+      "result": "passed"
+    }
+  ]
+}
