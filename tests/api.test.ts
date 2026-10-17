@@ -44,6 +44,24 @@ async function invite(projectId: string, ownerToken: string, account: { token: s
   return invitation.body.simulatedEmail.token as string;
 }
 
+test('dashboard and its browser assets are public while workspace data requires authentication', async () => {
+  const page = await fetch(base);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('content-type') ?? '', /text\/html/);
+  const html = await page.text();
+  assert.match(html, /Create account/);
+  assert.match(html, /src="\/assets\/app.js"/);
+  assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+  for (const asset of ['app.js', 'status.js', 'theme.css', 'favicon.svg']) {
+    const response = await fetch(`${base}/assets/${asset}`);
+    assert.equal(response.status, 200);
+    assert.ok((await response.text()).length > 100);
+  }
+  assert.equal((await request('GET', '/api/projects')).status, 401);
+  assert.equal((await fetch(`${base}/api/auth/me`)).headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(`${base}/assets/.env`)).status, 404);
+});
+
 test('health, API contract, administrator access and public HTML have correct visibility and escaping', async () => {
   assert.equal((await request('GET', '/health/ready')).status, 200);
   const spec = await request('GET', '/api/openapi.json');
@@ -62,6 +80,9 @@ test('health, API contract, administrator access and public HTML have correct vi
   const html = await page.text();
   assert.match(html, /&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>|Hidden service|secret-path/);
+  assert.match(html, /id="subscribe-form"/);
+  assert.match(html, /src="\/assets\/status.js"/);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
   await request('PATCH', `/api/projects/${project._id}`, { version: 1, publicEnabled: false }, owner.token);
   assert.equal((await fetch(`${base}/status/${project.slug}`)).status, 404);
   const invalidJson = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{bad' });

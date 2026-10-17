@@ -14,3 +14,6 @@ coverage
 *.tmp
 .codex
 .agents
+test-results
+playwright-report
+blob-report

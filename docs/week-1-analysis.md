@@ -1,152 +1,111 @@
-# Status Pulse — Week 1 engineering analysis
+# Status Pulse: architecture and design decisions
 
-## Scope and design status
+This document began with the week 1 analysis and now explains the final design. The original question has stayed the same: how can a small team monitor its services, investigate failures, and communicate clearly without losing the evidence behind a status?
 
-The current delivery target is weeks 1–4. [Requirements and acceptance criteria](requirements.md) define behavior and the week boundary. This analysis explains the intended v1 architecture; it does not claim that implementation, tests, or deployment are finished.
+The [requirements](requirements.md) define the expected behavior. The [workflow overview](workflow-overview.md) follows a user's journey through the system. This document explains why the application is structured this way and where its guarantees stop.
 
-The learner's original registration story remains in the requirements document. Requirements analysis makes desired behavior and failure cases explicit before API and database choices encode assumptions.
+## One application, two processes
 
-## Architecture decision
+Status Pulse uses Node.js 24, TypeScript, Express 5, and the native MongoDB driver. The browser dashboard is served by Express and calls the same API as other clients. A separate scheduler/worker handles outbound HTTP checks and simulated alert delivery.
 
-Use **Node.js 24, TypeScript, Express 5, and the native MongoDB driver**. Keep one modular codebase with independent HTTP API and scheduler/worker processes sharing a MongoDB replica set. The replica set enables multi-document transactions for related business writes.
+This keeps normal page requests independent of monitoring intervals. The worker can restart without restarting the website, and the website can restart while durable jobs remain in MongoDB. Both processes use the same application code and database.
 
-| Component | Purpose | Tradeoff |
+| Component | Responsibility | Reason for the choice |
 | --- | --- | --- |
-| Node.js 24 | Runs API and asynchronous outbound monitoring | Asynchronous execution still needs concurrency limits and race protection |
-| TypeScript | Expresses inspectable request, entity, and state contracts | Static types do not validate untrusted HTTP input |
-| Express 5 | Routes requests through parsing, authentication, authorization, validation, and handlers | Application structure and error contracts remain our responsibility |
-| Native MongoDB driver | Exposes document storage, indexes, conditional updates, sessions, and transactions directly | Requires explicit validation/mapping instead of ORM behavior |
-| MongoDB replica set | Durable data and transactions across related documents | More local setup than a standalone database |
-| API process | Handles authenticated and public requests | Should not wait for the next scheduled monitoring cycle |
-| Scheduler/worker process | Dispatches due slots, claims jobs, executes checks, and processes retry/delivery work | Requires durable leases, fencing, deduplication, and recovery tests |
+| HTML, CSS, and browser JavaScript | Dashboard, forms, charts, and interaction | Direct API integration with a small runtime and no separate frontend build |
+| Express API | Authentication, permissions, validation, safe responses | A focused HTTP layer with explicit domain modules |
+| TypeScript | Request, configuration, and state contracts | Makes the rules easier to inspect; runtime schemas still validate external input |
+| MongoDB replica set | Documents, indexes, conditional updates, transactions | Related writes can succeed or fail together |
+| Scheduler/worker | Reserve due work, claim jobs, check endpoints, record outcomes | Slow network requests do not occupy API handlers |
+| Simulated delivery | Record attempts, retry failures, and expose a protected demo inbox | Demonstrates reliability without a real email or payment provider |
 
-A modular monolith keeps shared rules understandable without adding multiple service-to-service networks or deployment stacks. A separate worker entry point permits independent restarts and worker capacity while retaining one application.
+A dedicated queue would provide more mature queue operations, but it would add another service to run and explain. The MongoDB-backed queue keeps this project focused; it also means that leases, retry limits, and recovery behavior must be implemented and tested here.
 
-A dedicated queue such as Redis-backed infrastructure is an alternative with mature queue features. PostgreSQL is another reasonable persistence choice. The selected MongoDB-backed design keeps the current stack focused; in exchange, we explicitly own job claims, leases, retries, indexes, and their tests. At larger scale, the dispatch implementation can change without replacing project permissions or incident rules.
+## The important flows
 
-```mermaid
-flowchart LR
-    Team[Authenticated team] --> API[Express API]
-    Visitors[Public visitors] --> Public[Public API / minimal HTML]
-    Public --> API
-    API --> Modules[Accounts, projects, services, incidents, alerts, plans]
-    Modules --> DB[(MongoDB replica set)]
-    Scheduler[Scheduler: reserve due slots] --> DB
-    DB --> Worker[Worker: claim lease and validate destination]
-    Worker --> Endpoint[Public HTTP/HTTPS endpoint]
-    Endpoint --> Worker
-    Worker --> Commit[Result and derived-state transaction]
-    Commit --> DB
-    Delivery[Simulated delivery processor] <--> DB
-```
+A private request is parsed, authenticated, checked against current project membership, validated, and handled. Knowing a resource ID does not grant access: the resource must belong to the project and the caller must have the required role. Related writes are committed before a safe response is returned.
 
-The database-to-worker arrow represents polling/claiming durable jobs, not an automatic database push. Scheduler and worker responsibilities may share one process while remaining separate modules.
+A monitoring cycle reserves a due slot, creates a uniquely identified job, claims a lease, rechecks the current service settings, validates the destination, and sends a timed GET or HEAD request. The network request happens outside the database transaction. A transaction cannot undo an HTTP request, and a slow endpoint must not hold a database transaction open.
 
-## Request and background flows
+When the result is ready, one transaction records the observation, advances the current status when appropriate, writes history, creates any incident/alert effects, and completes the job. A failed transaction leaves no partial authoritative result.
 
-A private request follows: parse bounded input → authenticate bearer session → load project membership → authorize action → validate input → execute business operation → commit related changes → serialize a safe response. Authorization includes resource-to-project ownership; knowing a service ID is insufficient.
+Alert delivery records whether a simulated attempt succeeded. Acknowledgement records that a person has taken responsibility. Neither implies the other. Payment simulation follows a similar rule: a failed attempt stays in history, a successful retry changes the plan once, and a repeated success returns the existing outcome.
 
-Monitoring follows: find eligible due service → reserve scheduled slot and create unique job → claim bounded lease → recheck current configuration/eligibility → validate and pin public destination → send timed HTTP request → commit one result, current status, history, incident/alert effects, and job completion. The network request occurs **outside** the transaction: a database transaction cannot undo an HTTP request, and slow endpoints must not hold database transactions open.
+## Identity and permissions
 
-Alert processing follows: durable problem transition → deduplicated alert → simulated delivery attempt → recorded success or retryable failure → separate human acknowledgement. Delivery and acknowledgement are different facts.
+Passwords use salted scrypt hashes. Sessions use random bearer tokens: the client receives the token, while the database stores its hash, account, expiry, and revocation state. A session normally lasts 24 hours. Logout revokes it immediately, and authentication checks expiry even before database cleanup runs.
 
-Simulated payment follows: authorize owner → validate idempotency key and request identity → record failure without changing plan, or commit success plus plan activation together → return recorded outcome on replay. A later retry after failure retains failed-attempt evidence.
+Membership is a relationship between a person and a project. A person may own one project, respond in another, and only view a third. Owners configure the project and invite responders or viewers. Responders manage operational work. Viewers can inspect the project. The [role matrix](requirements.md#actors-and-permission-boundaries) lists each boundary.
 
-## Authentication and authorization
+An invitation is tied to an email address and a one-use, expiring token. The invited account must authenticate with that address. Reissuing an invitation invalidates the older token. Invitations cannot create owners or platform administrators. An operator provisions platform administrators separately; that role does not grant automatic membership in private projects.
 
-Opaque sessions make revocation and current-role checking straightforward. Generate a random bearer token, return its raw value to the caller once, and store only its hash, user ID, 24-hour expiry, and revocation state. Clients use the Authorization header; tokens must not appear in URLs or public markup. The tradeoff is a session lookup for authenticated requests.
+## Data model
 
-Token hashing and password hashing solve different problems. A random session token has high entropy; a human password needs a deliberately expensive salted password-hashing function. Neither stored representation belongs in API responses.
+The collections follow the business facts that need independent history, queries, or uniqueness. Current counters and the active override are bounded fields on a service. Check results, incident updates, delivery attempts, and audit events have their own records because their histories grow over time.
 
-A user can own project A, respond in B, and view C. Membership therefore belongs to a unique project/user relationship. Check current memberships per action rather than trusting client-supplied roles. Registration cannot create administrators. V1 invitations assign responder/viewer; owner transfer/removal is outside the current contract. Platform administration is separate from project ownership.
-
-See the [role matrix](requirements.md#actors-and-permission-boundaries) for operation-level permissions.
-
-## Incremental data model
-
-Introduce these concepts alongside the features that need them. This is not an instruction to generate every collection before the first endpoint. Embedding versus separate documents follows query patterns, bounded growth, uniqueness needs, and transactional invariants.
-
-| Stage / concept | Real-world meaning and important fields | Relationships, constraints, indexes |
+| Data | What it represents | Important constraint |
 | --- | --- | --- |
-| User | Person: normalized email, name, password hash, creation time, explicit platform role if provisioned | Unique normalized email; no caller-selected administrator flag |
-| Session | Login: user ID, token hash, expiry, revocation | Unique hash; user/expiry indexes; expiry checked during authentication independently of cleanup |
-| Project | Team workspace: name, public identifier, current plan, creation/archive times | Unique public identifier where used; creator membership committed with project |
-| Membership | User's project role: project ID, user ID, role, attribution | Unique project/user pair; user index for project lists; invitations cannot grant owner |
-| Service/configuration | Monitored endpoint: project, name, URL, method, interval, timeout, expected statuses, slow/failure/recovery thresholds, public/enabled flags, revision, next due time | Due-work index; bounded validation; only owner changes configuration; archival stops dispatch |
-| AuditEvent | Attributable change: actor, action, project/resource, timestamp, safe metadata | Project/time and resource/time indexes; append-only history; no secrets |
-| CheckJob | Scheduled observation: service, revision, scheduled time, state, attempts, lease token/owner/expiry | Unique dispatch identity, normally service/revision/scheduled time; claimable-state/time index; conditional leases |
-| CheckResult | Immutable observation: job/service, observation time, latency, outcome, HTTP status, sanitized failure | Unique job ID; service/time index; one authoritative result per job |
-| Current status/counters | Latest accepted observation, consecutive successes/failures, calculated status, version | Can be embedded in Service; conditional ordering/version check prevents old results rewriting current state |
-| StatusHistory | Meaningful transition: service, old/new state, reason, result, time | Service/time index; unique transition identity; retained on archival |
-| Override | Temporary responder decision: state, reason, actor, start/expiry | Can be current embedded state plus audit history; enforce expiry in reads/work, not solely cleanup |
-| Incident | Investigation: service/project, title, lifecycle, visibility, outage trigger, creation/resolution times | Unique automatic outage trigger where present; project/state/time index; conditional lifecycle update |
-| IncidentUpdate | Narrative/state update: incident, author, visibility, body, time | Separate collection avoids unbounded embedded history; incident/time index |
-| Alert | Problem notification: project/service/incident, trigger key, delivery state, acknowledgement actor/time | Unique trigger key; pending-work and project/time indexes; explicit acknowledgement |
-| DeliveryAttempt | Simulated attempt: alert/subscription, channel, number, outcome/error, time | Separate attempt evidence; delivery/time index; failed history remains after success |
-| Subscription | Subscriber: normalized email, project, selected public services, verification state, token hash/expiry | Unique identity such as project/email with deduplicated selections; enforce public service ownership/visibility |
-| Payment operation/attempt | Simulated upgrade: project, plan, idempotency key, request fingerprint, outcome, retry linkage, activation time | Unique project/key; conflicting key reuse rejected; activation and plan update commit together |
+| Users and sessions | Identity and revocable access | Unique normalized email; hashed passwords/tokens; checked expiry |
+| Projects and memberships | Workspace and project roles | Project/creator membership created together; unique project/user membership |
+| Invitations | A pending membership offer | Email-bound, expiring, one-use token; limited roles |
+| Services and service versions | Current monitor settings and immutable revisions | Owner-only configuration; revision checks; due-work index |
+| Check jobs | Durable scheduled or manual work | Unique dispatch identity; attempts and current lease |
+| Check results | Observed HTTP outcome and timing | One authoritative result per job |
+| Status history | Effective status changes and their explanation | Retained through overrides and archival |
+| Incidents and updates | Investigation and communication | One active incident per service; ordered versioned transitions |
+| Alerts and delivery attempts | Problem notification and each simulated delivery | Unique problem key; delivery and acknowledgement separate |
+| Subscriptions and notifications | Selected public services and public updates | Normalized identity, token verification, current visibility recheck |
+| Payments | Simulated plan operation and attempt history | Unique project/idempotency key; one activation |
+| Audit and operational events | Who changed something, or why work failed | Safe metadata with actor/resource/time where applicable |
+| Worker heartbeats | Recent background-process activity | Independent from API readiness |
+| Simulated mail | Protected demonstration tokens | Owner-only access and automatic expiry |
 
-Static plan definitions live in validated configuration. Acknowledgement is stored as bounded fields on Alert. Invitations and serviceVersions are separate collections because token acceptance and immutable configuration history need their own records. The current override is embedded in Service, with changes preserved in audit/status history. The simulatedMail collection is an owner-only demonstration inbox with automatic expiry.
+Historical resources are archived. Archiving a service stops new scheduling and public exposure without erasing its checks or incidents. Token expiry cleanup is housekeeping; business retention and account erasure would need a separate policy.
 
-Historical resources use **archive-only deletion in v1**. Archiving stops future work and public eligibility without cascading away checks, incidents, or payment evidence. All active-work queries must respect archive state. Session/verification expiry cleanup is operational housekeeping, not deletion of business history. Retention and account erasure need a deliberate future policy.
+## Reliability guarantees
 
-## Reliability invariants
+Unique indexes prevent duplicate identities and authoritative records even when two requests arrive together. Transactions keep related writes consistent. Conditional revision checks prevent stale edits. Leases identify the worker currently allowed to complete a job; a replaced lease cannot later commit its result.
 
-- One service/configuration/scheduled slot creates one durable job, enforced by a unique database key.
-- Only the current lease can complete a job. Reclaim changes the lease token/version; a previous owner cannot commit after replacement.
-- One job creates at most one authoritative stored result. A repeated completion recognizes the existing result.
-- Only a newer accepted observation advances current counters/status. Late history may be retained without rewriting the present.
-- Related authoritative writes agree: result, status, history, automatic incident/alert, and job completion commit together.
-- One outage/problem episode produces at most one corresponding automatic incident and alert. A separate episode can generate new records.
-- Infrastructure and delivery retries are bounded and recorded. Exhaustion becomes visible failed work instead of silent success.
-- One successful simulated activation applies once. Failed payment leaves the plan unchanged; conflicting reuse of a key fails.
+These controls work together:
 
-A retry repeats an operation after uncertainty; a duplicate repeats work already received or completed. Idempotency makes repetition safe. Transactions make related database writes succeed/fail together. A lease identifies the current owner; a fencing token rejects a previous owner after replacement. These solve different parts of the same reliability problem.
+1. One service/configuration/scheduled slot produces one durable job.
+2. One current lease may complete that job.
+3. One job has at most one authoritative stored result.
+4. An older observation cannot replace newer current status.
+5. One problem episode does not create repeated automatic incidents and alerts.
+6. Infrastructure and delivery retries are bounded, visible, and preserve failed attempts.
+7. One successful simulated payment activates the plan once.
 
-A worker can crash after sending HTTP but before persisting the outcome. A later worker may send HTTP again. GET/HEAD and idempotent persistence make this manageable. The design promises one authoritative stored outcome, **not universal exactly-once network execution**.
+A worker can crash after sending HTTP and before saving the result. Another worker may send the request again. GET/HEAD and idempotent persistence make that manageable, but the guarantee remains one authoritative stored outcome rather than exactly-once network execution.
 
-## Status and incident policy
+## Status is evidence; an incident is a decision
 
-Defaults are three consecutive failures for outage and two consecutive successes for recovery. With no completed observation, status is unknown. Initial successful evidence remains unknown until the recovery threshold is reached. Failure before outage is degraded. Once outage is reached, retain outage until recovery succeeds; one success must not prematurely clear it. Slow responses can be degraded under the documented slow-threshold rule.
+With no completed check, the service is unknown. Under the defaults, two successful checks establish operational status. Failures produce degraded status until the third consecutive failure reaches outage. A single success during an outage does not clear it; two consecutive successes are needed. A slow successful response can still be degraded.
 
-Opposite outcomes reset the corresponding consecutive counter. Older/duplicate results must not advance counters. Staleness is max(three intervals, timeout plus interval), effectively three intervals with the current bounds. Stale evidence becomes unknown even if the last completed result was healthy.
+Opposite outcomes reset the relevant consecutive counter. Old or duplicate observations do not advance counters. Evidence becomes stale after `max(three intervals, timeout plus interval)`; with the allowed settings this is three intervals. Stale evidence is unknown even if the last result was healthy.
 
-Calculated state, active override, and incident lifecycle are separate. Overrides preserve raw checks and calculated state. An expiry resumes calculated state, including unknown when stale. Recovery does not fabricate acknowledgement or automatic incident resolution.
+A responder may temporarily override the displayed status with a reason and expiry. Monitoring continues, and calculated status remains separate. Expiry restores the calculated status, including unknown when evidence is stale.
 
-```mermaid
-stateDiagram-v2
-    [*] --> investigating
-    investigating --> identified
-    identified --> monitoring
-    monitoring --> resolved
-```
+Incidents move through investigating → identified → monitoring → resolved. Updates may stay in the current state or move to the next one; they cannot skip or reverse the lifecycle. A successful check does not make a responder's decision for them, so recovery adds evidence while the incident remains open.
 
-The expected current state participates in an incident update condition. Competing or stale transition requests receive a conflict rather than overwriting newer state.
+## Network safety and public information
 
-## SSRF and public information
+An endpoint monitor can otherwise become a way to reach internal services. Status Pulse restricts requests to GET/HEAD and public HTTP/HTTPS addresses, rejects credentials in URLs, validates every DNS answer, pins the approved connection address, keeps HTTPS hostname verification, blocks redirects, and bounds the total request time. It does not retain arbitrary response bodies.
 
-Server-side request forgery occurs when an attacker uses the monitor's outbound capability to reach localhost, a private network, cloud metadata, or another protected destination. Valid URL syntax alone cannot prevent it.
+Safety is checked again at execution because DNS and configuration can change. Tests use controlled resolvers/transports to exercise these rules without weakening production checks for localhost. Hosting-level egress controls can add protection, but application code alone does not establish those controls.
 
-V1 restricts protocols/methods, rejects URL credentials and custom authentication headers, validates IP literals and resolved hostname addresses, blocks private/loopback/link-local/reserved destinations including mapped forms, and pins the approved address for connection. Reject an unsafe DNS answer set rather than validating one address while the HTTP client independently resolves another. Keep HTTPS hostname/certificate verification. Disable redirects so they cannot switch to a newly unsafe destination. Bound request time and avoid retaining arbitrary response bodies. Check safety at execution as well as configuration because DNS and settings change.
+Public serializers select allowed fields explicitly. The project must be public, the service must be public and unarchived, and incident updates must be public. Endpoint URLs, internal notes, memberships, tokens, and configuration are excluded. HTML escapes user-supplied names and text. Subscription delivery checks visibility again so a formerly public service cannot keep leaking updates.
 
-Tests should inject controlled resolvers/transports or use controlled public fixtures. Do not weaken production checks to permit localhost. Production may add egress firewall controls; document controls actually deployed instead of claiming them from application validation.
+## Frontend decisions
 
-Public serializers explicitly choose allowed fields. Removing a few known secrets from a whole private document is fragile as fields evolve. Public incident output must respect service visibility and update visibility. Subscriptions cannot select private IDs by guessing them. Any HTML page must escape user-controlled service names and incident text.
+The dashboard keeps navigation and feedback consistent across monitoring, incidents, alerts, members, plans, and settings. Charts and status summaries come from API records. Empty, unknown, and paused states communicate missing or inactive monitoring rather than inventing activity.
 
-## API design principles
+CSS supplies the visual hierarchy, responsive layouts, hover feedback, focus states, transitions, and glow effects. Reduced-motion preferences must keep the same functionality without decorative movement. Forms use explicit labels and visible errors; API authorization remains authoritative even when controls are hidden for a role.
 
-Private routes require authentication and scoped authorization. Public routes use explicit safe projections. Resource groups are accounts/sessions, projects/memberships, services/checks/status, incidents/updates, alerts/acknowledgements, public status/subscriptions, simulated payment, and administration/audit.
+## Verification and limits
 
-Each endpoint documents method/path, request, authentication, role, validation, response, expected errors, and database effects. Use 201 for creation, 200 for reads/returned mutations, 204 when success has no body, 401 for invalid/missing authentication, 403 for insufficient permission when existence may be known, 404 for absent/inaccessible resources where appropriate, 409 for duplicates/conflicting transitions or idempotency misuse, and a consistent validation status. Unexpected failures return sanitized 500 responses.
+The test suite uses real isolated MongoDB replica sets for transaction, unique-index, concurrency, and permission behavior. Controlled network transports cover success, HTTP failure, DNS failure, timeout, redirects, and unsafe destinations. The deterministic demo connects the major features into a repeatable story; the browser review checks the actual interaction and layout.
 
-Exact paths and schemas belong in the evolving OpenAPI/Postman or API contract artifact. Distinguish HTTP request failures from background job failures and explicitly identify simulated operations.
+The final week adds targeted regressions for failures found during review, rather than relying on a successful happy-path demo. The [requirements map](requirements.md#implementation-and-verification-map) and [delivery report](final-delivery.md) make those checks traceable.
 
-## Verification and coursework evidence
-
-For each major feature: implement → manually exercise → add appropriate automated tests → run them → inspect/fix failures → record evidence. Tests assert business outcomes and invariants rather than merely mirroring internal branches.
-
-Unit tests cover deterministic validation, thresholds, and lifecycle rules. Integration tests against a MongoDB replica set cover uniqueness, transactions, authorization, claims, retries, and payment activation. Mocked database calls cannot prove real concurrency/transaction behavior. Controlled transports simulate timeout, connection failure, HTTP 500, slow response, success, and unsafe DNS without relying on unstable external services.
-
-By week 4, evidence should cover all seven integrated acceptance scenarios in [requirements.md](requirements.md#integrated-acceptance-scenarios), along with documented limitations. Shared/test deployment evidence checks API readiness, indexes/database connectivity, worker dispatch/completion, privacy, and simulated workflows. Preparing a deployment checklist is not proof of deployment.
-
-Weeks 5–6 reserve broader regression/failure review, hardening, documentation polish, final demo, and presentation practice. Deferral does not excuse missing authentication, private-data protection, transactions, duplicate prevention, or feature tests in weeks 1–4.
+The local single-node replica set is not highly available. The application does not send real email, prove mailbox ownership, or process payments. There is no multi-region runner, full APM, automatic remediation, or established backup/restore service. Deployment manifests are supplied; live deployment and recovery evidence must be recorded separately.

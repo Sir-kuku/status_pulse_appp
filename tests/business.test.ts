@@ -207,6 +207,40 @@ test('alert failures remain undelivered, retry is durable and concurrent deliver
   assert.equal(await ctx.db.collection('auditEvents').countDocuments({ resourceId: alert._id, action: 'alert.acknowledged' }), 1);
 });
 
+test('automatic alert delivery stops after three failures and an authorized explicit retry can recover it', async () => {
+  const f = await fixture();
+  await request('POST', `${f.path}/services/${f.service._id}/incidents`, { title: 'Delivery retry budget', message: 'Investigating' }, f.credentials.owner);
+  const alert = await ctx.db.collection('alerts').findOne({ projectId: f.projectId });
+  assert.ok(alert);
+  const originalNow = ctx.now;
+  let current = ctx.now();
+  ctx.now = () => new Date(current);
+  try {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      assert.equal(await deliverPendingAlerts(ctx, { alertId: alert._id, simulateFailure: true }), 1);
+      current = new Date(current.getTime() + 60_000);
+    }
+    assert.equal(await deliverPendingAlerts(ctx, { alertId: alert._id }), 0);
+    const exhausted = await ctx.db.collection('alerts').findOne({ _id: alert._id });
+    assert.equal(exhausted?.deliveryState, 'failed');
+    assert.equal(exhausted?.attempts, 3);
+    assert.ok(exhausted?.retryExhaustedAt);
+    assert.equal(exhausted?.nextAttemptAt, undefined);
+    assert.equal(exhausted?.deliveredAt, undefined);
+    assert.equal(exhausted?.acknowledgedAt, undefined);
+    const retryPath = `${f.path}/alerts/${alert._id}/retry`;
+    assert.equal((await request('POST', retryPath, {}, f.credentials.viewer)).status, 403);
+    const recovered = await request('POST', retryPath, {}, f.credentials.responder);
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.body.alert.deliveryState, 'delivered');
+    assert.equal(recovered.body.alert.attempts, 4);
+    assert.equal(recovered.body.alert.retryExhaustedAt, undefined);
+    assert.equal(recovered.body.alert.acknowledgedAt, undefined);
+    assert.equal(await ctx.db.collection('alertAttempts').countDocuments({ alertId: alert._id, outcome: 'failed' }), 3);
+    assert.equal(await ctx.db.collection('alertAttempts').countDocuments({ alertId: alert._id, outcome: 'delivered' }), 1);
+  } finally { ctx.now = originalNow; }
+});
+
 test('simulated payment failures preserve plan and concurrent successful retries activate exactly once', async () => {
   const f = await fixture();
   const path = `${f.path}/payments/simulate`;

@@ -1,45 +1,22 @@
-# Deployment and environment guide
+# Running and deploying Status Pulse
 
-## Delivery status
+Status Pulse has two application processes: the web API, which also serves the frontend, and the scheduler/worker, which performs monitoring. Both need the same MongoDB replica set and database. A working homepage is only one part of a working deployment.
 
-A runtime image definition and local Compose stack are included. **No hosted URL or remote worker has been provisioned or verified by this document.** GitHub Actions [run 38935236704](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed the tests, contract validation, compilation, Compose configuration validation, and Docker image build. Docker/Compose were not executed locally. Deployment is complete only after verification succeeds in the target environment.
+The repository includes native development scripts, Docker Compose, a production Dockerfile, and a Render Blueprint. The [final delivery report](final-delivery.md#verification-record) records what has actually been executed. No hosted deployment is claimed by this guide.
 
-## GitHub and Render
+## Choose an environment
 
-The user-selected deployment target is GitHub plus Render. The root `render.yaml` defines a Free web API and a separate **paid** background worker using the `0.5c-512mb` compute plan. Review the displayed charge before creating that worker. Render has no free background-worker plan. Its Free web service can spin down when idle, so the first request after inactivity can be delayed. The paid worker continues monitoring independently. No paid service has been created here. [Render free-service limits](https://render.com/docs/free), [compute plans](https://render.com/docs/compute-plans)
-
-1. The project is available in [Sir-kuku/status_pulse_appp](https://github.com/Sir-kuku/status_pulse_appp), branch `main`. Open its **Actions** tab and confirm the **Backend checks** workflow is green for the version you are deploying.
-2. In the [Render dashboard](https://dashboard.render.com), select **New > Blueprint**. Connect your GitHub account if needed, grant Render access to this repository, and select **Connect** beside `status_pulse_appp`. Use Blueprint name `status-pulse`, branch `main`, and Blueprint path `render.yaml`. Select the repository through the GitHub integration so automatic deployments and check results are available. [Blueprint setup](https://render.com/docs/infrastructure-as-code)
-3. Review the two resources: `status-pulse-api` (Free) and `status-pulse-worker` (paid). The file already specifies Docker, region, commands, and health check. Do not add npm build/start commands. Their `checksPass` trigger deploys updates after GitHub checks pass. [Blueprint reference](https://render.com/docs/blueprint-spec)
-4. Render asks for two values for **each service**. Set `MONGODB_URI` to the Atlas URI below with your database-user password percent-encoded. Keep the actual URI in Render's environment settings. Set `PUBLIC_BASE_URL` temporarily to `https://example.invalid` because the actual hostname is not assigned yet. This temporary value must be replaced in step 6. The other variables are supplied by the Blueprint.
-
-   ```text
-   mongodb+srv://status_pulse_app:ENCODED_PASSWORD@cluster0.t9tey8e.mongodb.net/status_pulse?retryWrites=true&w=majority&authSource=admin
-   ```
-
-   Use the password created for `status_pulse_app`, not your Atlas website login. Replace only `ENCODED_PASSWORD`; do not include angle brackets. Percent-encode reserved characters (for example, `@` becomes `%40`). Never commit or post the completed URI.
-
-5. After reviewing the displayed worker cost, click **Deploy Blueprint**. Open each created service, choose **Connect > Outbound**, and copy all displayed IP ranges (including their `/...` suffixes). In Atlas, go to **Database & Network Access > IP Access List > Add IP Address**, add those ranges, and wait until active. Both services are in Frankfurt and may show the same ranges; identical entries only need adding once. [Render outbound IP instructions](https://render.com/docs/outbound-ip-addresses)
-6. Copy the actual `https://...onrender.com` address displayed on the **API** service. In the **Environment** settings of both the API and worker, replace `PUBLIC_BASE_URL` with that API address. Save and redeploy. If initial startup failed before Atlas access was ready, use **Manual Deploy > Deploy latest commit** on both services after the IP entries are active. The worker uses the API's address and has no public website URL of its own.
-7. Open the API address followed by `/health/ready` (expect `{"status":"ready"}`) and `/docs`. The worker logs should show `Status Pulse scheduler and check worker started.` Register/create a project and service through the API and confirm new scheduled results appear; this verifies the worker beyond startup. Local demo accounts and data are not automatically copied to Atlas. Record the deployed URL and worker evidence below.
-
-The API runs `node dist/src/server.js`; the worker runs `node dist/src/worker.js`. Both connect to the same Atlas database. Public status pages use `/status/PROJECT-SLUG`.
-
-Platform administrators are provisioned separately: register the intended account, then run `npm run admin -- --email ACCOUNT_EMAIL` from an operator checkout configured for that same database. Normal signup never grants administration. `/api/admin/operations` reports worker heartbeats and failures; `/api/admin/audit` reports audit events.
-
-## Environment choices
-
-| Environment | Database | API | Worker |
+| Environment | Database | Web process | Background process |
 | --- | --- | --- | --- |
-| Native local | npm run dev:db, persistent replica set on 127.0.0.1:27018 | npm run dev | npm run dev:worker |
-| Local containers | Internal mongo:27017, single-node rs0 | Container on 127.0.0.1:3000 | Separate container |
-| Shared/test host | Atlas or another secured replica set | HTTPS service using runtime image | Background service using same image |
+| Local native | Persistent replica set on `127.0.0.1:27018` | `npm run dev` | `npm run dev:worker` |
+| Local containers | Internal `mongo:27017`, replica set `rs0` | API container on `127.0.0.1:3000` | Separate worker container |
+| Shared host | Atlas or another secured replica set | HTTPS web service | Background worker using the same image |
 
-Standalone MongoDB cannot provide the required multi-document transactions. Single-node replica sets support local transactions but offer no high availability. Replica member hostnames must be reachable by clients. [MongoDB replica-set setup](https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set/)
+Use Node.js 24. A standalone MongoDB process cannot provide the multi-document transactions used by this project. The combined `npm run local` command is the easiest local route; the [README](../README.md#start-the-project) covers it.
 
 ## Local containers
 
-With Docker and Compose installed, run from the repository root:
+With Docker and Compose available, run:
 
 ```powershell
 docker compose config --quiet
@@ -48,114 +25,123 @@ docker compose ps
 docker compose logs --tail 50 api worker
 ```
 
-The database health check initializes rs0 once and waits for a writable primary. API/worker depend on database health. MongoDB has no host-published port; the API binds only to 127.0.0.1. This unauthenticated database is suitable only for the local Compose network. [Docker readiness dependency behavior](https://docs.docker.com/compose/how-tos/startup-order/)
+Compose waits for the database health check to initialize the replica set and report a writable primary before starting the API and worker. Docker explains this dependency behavior in its [startup-order documentation](https://docs.docker.com/compose/how-tos/startup-order/).
 
-Verify readiness:
+Open `http://localhost:3000/` and check readiness:
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/health/ready
 ```
 
-Create a scheduled service and inspect completed checks to verify the worker. Stop while retaining the named volume:
+Create a monitor and verify that stored check results appear. Stop the containers while preserving the named database volume:
 
 ```powershell
 docker compose down
 ```
 
-Do not add volume removal when preserving history. Native and Compose databases are distinct stores. Avoid running both APIs on port 3000 simultaneously.
+The Compose database is unauthenticated, has no host-published port, and belongs only on the local container network. The API binds to loopback. Native and Compose databases are separate stores. Avoid running both APIs on port 3000 at once, and do not remove the database volume when preserving history.
 
-## Atlas
+## Prepare a release
 
-Create a MongoDB **database user**, distinct from an Atlas website account, with read/write access to status_pulse rather than every database. The current application creates collections/indexes at startup, so the role must allow those operations. Stricter migration/runtime role separation requires changing startup migration behavior.
-
-For local access allow the developer's current IP; for deployment allow the host's documented outbound addresses. Do not routinely open the database to all addresses. Atlas needs an authorized database user and network source. [Atlas driver connection instructions](https://www.mongodb.com/docs/atlas/driver-connection/)
-
-Store credentials in .env or host secrets:
-
-```dotenv
-MONGODB_URI=mongodb+srv://APP_USER:ENCODED_PASSWORD@YOUR_CLUSTER.mongodb.net/status_pulse?retryWrites=true&w=majority&authSource=admin
-MONGODB_DATABASE=status_pulse
-```
-
-Use your actual Atlas hostname. Percent-encode reserved characters in username/password components, not the whole URI; @ in a password becomes %40. authSource=admin specifies authentication while status_pulse is the application database. [MongoDB connection options](https://www.mongodb.com/docs/manual/reference/connection-string-options/)
-
-Distinguish DNS/allowlist issues from credentials/authSource or missing privileges. Never post credential-bearing URIs in screenshots. [Atlas troubleshooting](https://www.mongodb.com/docs/atlas/troubleshoot-connection/)
-
-If Render builds successfully but the API exits at startup, use the startup diagnostic's phase and MongoDB error code:
-
-| Diagnostic | Action |
-| --- | --- |
-| Authentication failed | Check the `status_pulse_app` database-user password in `MONGODB_URI`, encode reserved characters once, and retain `authSource=admin`. |
-| Code 13: permission denied | Set `MONGODB_DATABASE=status_pulse` and verify the user has `readWrite` on `status_pulse`. |
-| Connection unavailable | Verify the cluster hostname and add the service's **Connect > Outbound** ranges to Atlas's IP access list. |
-| Code 85/86: index conflict, or 11000: duplicate records | Review existing indexes/data before applying a migration; do not erase the database. |
-
-Atlas code `8000` is shared by different failures. Its diagnostic includes a sanitized Atlas explanation and the collection whose indexes were being created; use that explanation to distinguish permissions, quotas, or command restrictions. Recording the migration result is reported as a separate step.
-
-Save corrected environment values in Render and redeploy. Startup diagnostics redact connection strings, credentials, and command/document bodies; share the diagnostic line without copying environment settings. A successful build alone does not verify the database connection.
-
-## Shared/test services
-
-Validate before publishing:
+From the version you intend to deploy:
 
 ```powershell
 npm ci
 npm run check
+npm run test:e2e
+npm run demo
 docker build -t status-pulse:review .
 ```
 
-The multi-stage Dockerfile compiles with locked build dependencies, installs production-only runtime dependencies, and runs as the non-root node user. Tests/local MongoDB binary tooling are not runtime requirements.
+The Dockerfile compiles TypeScript with build dependencies, copies the compiled API/worker plus frontend assets and documentation, installs production runtime dependencies, and runs as the non-root `node` user. The runtime image does not need the local MongoDB test helper.
 
-Provision two services from the reviewed image:
-
-| Service | Start command | Exposure |
+| Process | Command | Exposure |
 | --- | --- | --- |
-| API | node dist/src/server.js | Host HTTPS ingress to PORT |
-| Scheduler/worker | node dist/src/worker.js | No public HTTP ingress |
+| Web API and frontend | `node dist/src/server.js` | Host HTTPS ingress to `PORT` |
+| Scheduler/worker | `node dist/src/worker.js` | No public HTTP ingress |
 
-Both share database configuration and simulation policy. Use the host-assigned port for the API:
+The frontend is served by the API process. Deploying only static files would leave authentication, project data, and monitoring unavailable.
+
+## Database and environment
+
+Create an Atlas database user with the permissions needed for `status_pulse`, including collection/index creation at startup. This is separate from the Atlas website login. Restrict database network access to the clients and host egress ranges that need it. See the official [Atlas connection instructions](https://www.mongodb.com/docs/atlas/driver-connection/).
+
+Store the actual URI in host secrets, never in source control or screenshots. Use your cluster hostname and percent-encode reserved characters in credentials once:
 
 ```dotenv
 NODE_ENV=production
 PORT=3000
-MONGODB_URI=<secret Atlas replica-set URI>
+MONGODB_URI=mongodb+srv://APP_USER:ENCODED_PASSWORD@YOUR_CLUSTER.mongodb.net/status_pulse?retryWrites=true&w=majority&authSource=admin
 MONGODB_DATABASE=status_pulse
-PUBLIC_BASE_URL=https://<deployed-api-hostname>
+PUBLIC_BASE_URL=https://YOUR_API_HOSTNAME
 WORKER_CONCURRENCY=4
 WORKER_POLL_MS=1000
 SESSION_TTL_HOURS=24
 ENABLE_SIMULATIONS=true
 ```
 
-Production rejects non-HTTPS PUBLIC_BASE_URL. Configure actual host TLS; a URL variable does not enable encryption. Configure reverse-proxy/rate-limit behavior for the actual topology rather than trusting arbitrary forwarded headers.
+Both application processes use the same database and simulation policy. Use the platform's assigned port when provided. `PUBLIC_BASE_URL` must be the actual HTTPS origin in production; the variable itself does not configure TLS. Startup applies the repeatable named index migration. Future schema changes should have explicit migrations, not instructions to erase collections.
 
-Database connection applies the repeatable named index migration. A source-based release job with development tools can run npm run migrate explicitly. Do not run the development database helper on the host. Preserve the database independently of process restarts.
+The API's production proxy configuration assumes one trusted proxy hop. Review that setting if you deploy behind a different topology, since it affects client IP identification and rate limiting.
 
-Production simulation still sends no real email or payments. Public responses suppress verification tokens; owners use the protected simulator inbox. Switching ENABLE_SIMULATIONS off does not configure real delivery.
+## Render setup
 
-## Deployment evidence
+The supplied `render.yaml` declares a Docker web service and a Docker background worker. Its web plan is `free` and its worker plan is `0.5c-512mb`. The worker uses paid compute; review the price shown by Render before creating resources. The official [Blueprint reference](https://render.com/docs/blueprint-spec) describes these fields and plan identifiers.
 
-Record deployed URL, source revision/image, verification date, and outputs when these actually pass:
+1. Connect the intended repository and revision through Render's Blueprint flow, using `render.yaml` at the repository root. Confirm the checks for that revision passed.
+2. Review the API and worker resources and their displayed cost. Enter `MONGODB_URI` and `PUBLIC_BASE_URL` for both services through environment settings. If the API hostname is not assigned yet, replace any temporary HTTPS placeholder with the real origin as soon as the service is created.
+3. Add the API and worker's documented outbound IP ranges to Atlas network access. Render lists those ranges in the service's **Connect → Outbound** view; follow its [outbound IP instructions](https://render.com/docs/outbound-ip-addresses).
+4. Redeploy both services after the database access list and real public origin are set. The web service uses the Dockerfile command; the worker overrides it with `node dist/src/worker.js`.
+5. Check the homepage, API readiness, and the worker logs. Then create a monitor and verify a new stored check. Record the source revision, URL, time, and evidence below.
 
-1. Liveness succeeds and readiness confirms database access.
-2. Registration/login/project creation work; unrelated accounts cannot access the project.
-3. A public-safe endpoint produces persisted scheduled results from the independent worker.
-4. Failure/recovery thresholds, history, overrides, and stale unknown behave correctly.
-5. Repeated processing produces no duplicate authoritative result, active incident, or alert.
-6. Simulated alert failure/retry and separate acknowledgement work.
-7. Public output omits private services, URLs, notes, memberships, and tokens.
-8. Selected-service subscription verification and public notifications work through simulation.
-9. Failed payment preserves free plan; retry succeeds and replay activates once.
-10. API/worker restarts preserve data and resume eligible work.
-11. Authorized audit/administration show changes/failures without secrets.
-12. Limitations and deferred weeks 5–6 work are recorded.
+Local accounts and demo records are not copied to the hosted database. The worker has no public website URL; its `PUBLIC_BASE_URL` is the API's origin.
 
-Use controlled tests/demo for repeatable timeout/crash/concurrency scenarios. The isolated local demo does not verify the deployed network/database/worker.
+## Administrator access
+
+Register the intended account first. From an operator checkout configured for the same database, run:
+
+```powershell
+npm run admin -- --email operator@example.com
+```
+
+The protected `/api/admin/operations` route exposes recent worker heartbeat and failure information. `/api/admin/audit` exposes audit events. Project ownership alone does not grant access, and platform administration does not automatically reveal private project data through ordinary project routes.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Homepage loads but no checks appear | Confirm the independent worker runs against the same database; inspect job failures and worker heartbeat |
+| Readiness returns unavailable | Inspect the sanitized startup/connection diagnostic and database reachability |
+| Authentication failure | Check the database user's password, credential encoding, and `authSource` |
+| Permission denied / code 13 | Check the database name and user's permissions for it |
+| Connection unavailable | Verify the hostname, network access list, and both services' egress ranges |
+| Index conflict / code 85 or 86 | Compare existing indexes with the migration before changing data |
+| Duplicate records / code 11000 | Investigate the conflicting unique values; do not erase the database |
+| Atlas code 8000 | Read the sanitized explanation and failing phase; that code has several possible causes |
+| Public page returns 404 | Confirm the project is public, unarchived, and its slug matches |
+| Status remains unknown | Wait for enough successful checks, or inspect missing/stale results and worker failures |
+
+Startup diagnostics identify the failing phase and redact connection strings, credentials, and command/document bodies. A successful image build does not verify a database connection.
+
+## Hosted verification record
+
+Fill this in only after checking the deployed environment. The isolated demo is useful acceptance evidence, but it cannot prove the host's network, database, or worker is working.
+
+| Item | Evidence to record |
+| --- | --- |
+| Release | Source revision/image and deployment time |
+| Web/API | Actual HTTPS URL, homepage, `/health/live`, `/health/ready`, and API contract |
+| Accounts and roles | Registration/login, project creation, and unrelated-account denial |
+| Worker | Persisted scheduled check with timestamp plus worker heartbeat |
+| Persistence | API/worker restart retains data and resumes eligible work |
+| Status and incidents | Failure/recovery, history, override expiry, and explicit lifecycle |
+| Alerts | Failed/successful simulation and separate acknowledgement |
+| Public visibility | Hidden service/URL/internal-note exclusion and public subscription flow |
+| Plans | Failed payment preserves plan; successful retry/replay activates once |
+| Operations | Restricted administration, useful failure evidence, and safe logs |
 
 ## Operational limits
 
-The local database is unauthenticated and not publicly exposed. Hosted databases need access controls, backups, and capacity monitoring. Readiness is not worker-progress monitoring; later hardening should detect stalled jobs and repeated/exhausted failures.
+Simulations remain simulations in production. Public verification responses suppress tokens; the project owner can retrieve demonstration tokens through the protected inbox. Setting `ENABLE_SIMULATIONS=false` disables those flows and does not install a real provider.
 
-Application SSRF protection validates/pins public destinations and blocks redirects. Hosting egress controls are additional defense only if actually configured; these files do not establish cloud infrastructure isolation.
-
-CI uses official [checkout](https://github.com/actions/checkout) and [setup-node](https://github.com/actions/setup-node) actions. A workflow file does not trigger CI or publish an image without a configured repository/host.
+Hosted operation still needs appropriate backups, restore drills, monitoring, capacity planning, and access controls. A single-node local replica set is not high availability. Application destination validation adds SSRF protection, but hosting egress isolation exists only when it has actually been configured. The current GitHub Actions file defines checks and container-build verification; its presence alone does not prove a remote run or publish an image.

@@ -1,181 +1,136 @@
 # Status Pulse
 
-A backend monitoring capstone built with Node.js 24, TypeScript, Express 5, and the native MongoDB driver. An independent scheduler/worker checks public HTTP endpoints, derives availability, records incidents, and processes simulated alerts.
+Status Pulse helps a team answer three practical questions: are our services working, what are we doing about a problem, and what should our users know? It checks public HTTP endpoints, records their status, manages incidents and alerts, and publishes a safe status page.
 
-The current scope is **weeks 1–4**: requirements/design, monitoring, status/incident workflows, alerts, public status, subscriptions, and simulated plans. Weeks 5–6 reserve broader hardening, documentation polish, the final demonstration, and presentation. Tests and documentation accompany current features.
+This repository brings the six-week project together: the monitoring backend, a responsive browser dashboard, regression tests, API documentation, deployment configuration, and a presentation guide. The dashboard uses the same authenticated API as other clients; monitoring continues in an independent worker process.
 
-Email, subscriber verification, and payments are **simulated**. No real email is sent, no mailbox ownership is proven, and no money is charged. Adding deployment files does not establish a hosted service; follow [deployment instructions](docs/deployment.md) and record actual verification evidence.
+**Email, subscription verification, invitations, and payments are simulations.** No email is sent, mailbox ownership is not proven, and no money is charged. Local verification and hosted deployment are recorded separately in the [final delivery report](docs/final-delivery.md).
 
-## Run locally
+## Start the project
 
-Fastest option after `npm ci`: run `npm run local`, then open **http://localhost:3000/docs**. This starts the isolated persistent database, API, and independent worker together. Ctrl+C stops them and preserves data. The existing Windows MongoDB service and Atlas data are untouched.
-
-Public project pages are available at `/status/PROJECT-SLUG` once the project and its services are public. API definitions can be imported into Postman from `/api/openapi.json`.
-
-Use Node.js 24 and npm. Run commands from the repository root. No Atlas credentials or Docker are needed for the local replica-set option.
-
-Install dependencies:
+Use Node.js 24 and npm. From the repository directory:
 
 ```powershell
 npm ci
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+npm run local
 ```
 
-Create configuration once; preserve an existing .env:
+Open **http://localhost:3000/** for the dashboard. The helper starts a persistent, isolated MongoDB replica set, the API, and an independent worker. Stop it with Ctrl+C; your local data is preserved. It does not use or modify an existing Windows MongoDB service or an Atlas database.
+
+On macOS/Linux, create configuration with `test -f .env || cp .env.example .env`. The first MongoDB start may need internet access to download a binary. On Windows, the helper can reuse an installed MongoDB executable. Set `MONGOMS_SYSTEM_BINARY` to choose a compatible executable explicitly.
+
+If `.env` already points to Atlas or another database, use the separate processes below instead of `npm run local`. The combined helper deliberately accepts only its isolated local database URI.
+
+| Address | What you will find |
+| --- | --- |
+| `/` | Team dashboard and account access |
+| `/status/PROJECT-SLUG` | A project's public status page, when enabled |
+| `/docs` | API reference |
+| `/api/openapi.json` | OpenAPI contract for Postman or other clients |
+| `/health/live` | Whether the API process responds |
+| `/health/ready` | Whether the API can reach its database |
+
+Readiness does not prove the worker is making progress. Create a monitor and inspect its stored check results to verify the complete system.
+
+## Try it in the browser
+
+1. Create an account using a unique email and a password of 15–128 characters.
+2. Create a project, then add a public HTTP or HTTPS endpoint as a monitor. Choose whether it should appear on the public status page.
+3. Wait for the worker, or queue a check from the monitor details. The initial state is **unknown** until enough evidence exists.
+4. Inspect response times, recent checks, and status history. Defaults require two healthy checks for operational status, three consecutive failures for an outage, and two consecutive successes for recovery.
+5. Open an incident, add updates through investigating → identified → monitoring → resolved, and acknowledge its alert. Recovery and acknowledgement are separate decisions.
+6. Open the public page in a separate browser context. Only explicitly public services and incident information should appear.
+
+Project owners configure monitors, manage members, change visibility, and simulate plan upgrades. Responders investigate incidents, queue checks, set temporary overrides, and acknowledge alerts. Viewers can inspect their project's information. Platform administration is provisioned separately.
+
+The interface uses live API data. An empty history means no checks have been recorded; a queued check needs a running worker. Public example endpoints are useful for interaction, but their current response time is not a repeatable test fixture. Use the [demo guide](docs/final-delivery.md#demonstration-walkthrough) for a presentation with repeatable evidence.
+
+## Run the pieces separately
+
+Keep each long-running command in its own terminal:
 
 ```powershell
-Copy-Item .env.example .env
-```
-
-On macOS/Linux use `cp .env.example .env`. The example points to a local MongoDB replica set on port 27018. Never commit .env.
-
-In terminal 1, start the persistent development database and leave it running:
-
-```powershell
+# Terminal 1: local database; omit this when using Atlas
 npm run dev:db
 ```
 
-On Windows the helper reuses an installed MongoDB 8.2, 8.0, or 7.0 executable with separate data and port. Otherwise the first start downloads a MongoDB executable and needs internet access. Set MONGOMS_SYSTEM_BINARY to select another compatible executable. Console output identifies its connection/storage location. A replica set supports the transactions required here; a standalone MongoDB process is insufficient.
-
-In terminal 2, create/verify indexes:
-
 ```powershell
+# Terminal 2: explicit, repeatable index migration, then the API
 npm run migrate
-```
-
-Then start the API:
-
-```powershell
 npm run dev
 ```
 
-In terminal 3, start the independent scheduler/worker:
-
 ```powershell
+# Terminal 3: scheduler and monitoring worker
 npm run dev:worker
 ```
 
-Check API readiness in another terminal:
+A MongoDB **replica set** is required because related writes use transactions. A standalone MongoDB process is insufficient. Startup also applies the named index migration, so migration can safely be repeated.
+
+## Verify the work
 
 ```powershell
-Invoke-RestMethod http://localhost:3000/health/ready
+npm run check
+npm run test:e2e
+npm run demo
 ```
 
-A successful response means the API can reach its database. To verify the worker, create a service, wait for its interval, and inspect persisted checks. Stop development processes with Ctrl+C.
+`check` runs TypeScript and browser JavaScript validation, the OpenAPI contract check, backend tests, and a production build. `test:e2e` checks real browser workflows against an isolated API. On Windows it uses installed Chrome by default; other platforms use Playwright Chromium (`npx playwright install chromium`). See the [browser setup](docs/final-delivery.md#verification-record) for alternatives. `demo` runs integrated acceptance scenarios and writes `.local/verification/demo.json`. All three use isolated replica sets and controlled checker outcomes, without touching the persistent development database or requiring Atlas credentials. `npm run verify` runs the three commands together.
 
-## Commands and verification
+The [final delivery report](docs/final-delivery.md#verification-record) records the latest actual results and their limits. The [requirements matrix](docs/requirements.md#implementation-and-verification-map) connects every acceptance criterion to the implementation and relevant checks. Generated reports, screenshots, local databases, dependencies, and build output are excluded from source control; include only the evidence you intend to submit.
 
 | Command | Purpose |
 | --- | --- |
-| npm run dev:db | Persistent local MongoDB replica set |
-| npm run local | Start local database, API, and worker together |
-| npm run migrate | Repeatable initial index migration |
-| npm run dev | API with source reload |
-| npm run dev:worker | Scheduler/worker with source reload |
-| npm run typecheck | TypeScript validation without output |
-| npm run contract | Validate the OpenAPI contract |
-| npm test | Automated tests with isolated replica sets and controlled HTTP transports |
-| npm run build | Compile TypeScript into dist |
-| npm run check | Typecheck, validate the API contract, test, and build |
-| npm run demo | Deterministic acceptance demo with isolated data; no Atlas credentials |
-| npm start | Compiled API: node dist/src/server.js |
-| npm run worker | Compiled worker: node dist/src/worker.js |
-| npm run admin -- --email existing@example.com | Grant platform administration to an existing account; operator only |
-
-Tests/demo are isolated from the persistent development database. The first test run may download MongoDB. A controlled test transport is not a production URL-validation bypass. GitHub Actions runs checks and builds the container; the workflow file alone does not prove a remote run passed.
-
-Verification recorded on 16 October 2026: 38 tests and 10 acceptance demo scenarios passed, TypeScript and all 40 OpenAPI paths validated, and the build succeeded. The persistent local API and independent worker were also verified with a stored HTTP 200 check and a public page at `/status/local-demo`. The earlier [GitHub Actions run](https://github.com/Sir-kuku/status_pulse_appp/actions/runs/38935236704) passed its checks, Compose validation, and Docker image build. Hosted deployment has not yet been verified.
-
-Run `npm run demo` to regenerate detailed acceptance evidence at `.local/verification/demo.json`. Generated results stay out of source control; save the latest report with your assessment submission when needed.
-
-## API documentation and first requests
-
-[OpenAPI 3.0.3 contract](docs/openapi.json) contains schemas, roles, response envelopes, errors, and privacy boundaries. Import it into Postman or another compatible client. The API serves it at GET /api/openapi.json; /docs links to the contract.
-
-Register with an unused email and a 15–128 character password:
-
-```powershell
-$registrationBody = @{
-  name = "Project Owner"
-  email = "owner@example.com"
-  password = "a-long-demo-passphrase"
-} | ConvertTo-Json
-
-$registration = Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/auth/register -ContentType "application/json" -Body $registrationBody
-$authHeaders = @{ Authorization = "Bearer $($registration.token)" }
-```
-
-Registration returns a safe user, bearer token, and expiry. Treat the token as a password; keep it out of source control/shared logs. Sessions normally last 24 hours and logout revokes them.
-
-Create a project:
-
-```powershell
-$projectBody = @{
-  name = "My API"
-  slug = "my-api-status"
-  publicEnabled = $true
-} | ConvertTo-Json
-
-$createdProject = Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/projects -Headers $authHeaders -ContentType "application/json" -Body $projectBody
-```
-
-The creator becomes owner transactionally. Owners invite responder/viewer members. The invited account must authenticate and accept its simulated token. Roles are project-specific; outsiders cannot access the project.
-
-Create a service:
-
-```powershell
-$projectId = $createdProject.project._id
-$serviceBody = @{
-  name = "Example endpoint"
-  url = "https://example.com/"
-  method = "GET"
-  intervalSeconds = 60
-  timeoutMs = 5000
-  expectedStatusMin = 200
-  expectedStatusMax = 299
-  slowThresholdMs = 1000
-  failureThreshold = 3
-  recoveryThreshold = 2
-  enabled = $true
-  publicVisible = $true
-} | ConvertTo-Json
-
-$createdService = Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/projects/$projectId/services" -Headers $authHeaders -ContentType "application/json" -Body $serviceBody
-```
-
-This external example is for interactive use; its availability/latency is not deterministic test evidence. GET/HEAD to public HTTP/HTTPS are supported. Private/reserved addresses, URL credentials, and redirects are blocked. Raw URLs remain private.
-
-The worker runs checks. Initial status is unknown; defaults require two healthy successes for operational, three consecutive failures for outage, and two consecutive successes for recovery. Outage persists until recovery. Slow responses can be degraded; stale evidence is unknown. Responders resolve incidents explicitly.
-
-Fetch current project/service/incident data before editing. Project and incident updates require the current version; service updates provide the current configuration version using the request's version field. Stale writes conflict rather than silently overwriting another change. See the contract for exact schemas.
-
-## Simulations and visibility
-
-- Public exposure requires project and service visibility. Public projections omit URLs, internal notes, members, tokens, and private configuration.
-- Subscriber verification uses a simulated inbox. Development responses may expose a simulator token; production public responses do not. An authenticated owner retrieves the simulator inbox for coursework demonstrations.
-- Alert delivery failure/success and human acknowledgement remain distinct. Authorized responders can simulate failure and retry.
-- A payment idempotency key identifies an upgrade. Failure preserves the plan; retry with the same key may succeed; successful replay does not reactivate it.
-- Invitations cannot grant owner or platform administrator status. Administrator provisioning is an operator action.
+| `npm run local` | Start the isolated local database, API, and worker |
+| `npm run dev:db` | Run only the persistent development replica set |
+| `npm run dev` / `npm run dev:worker` | Run the API / worker with source reload |
+| `npm run migrate` | Apply or verify indexes |
+| `npm run typecheck` | Check TypeScript without emitting files |
+| `npm run contract` | Validate the OpenAPI contract |
+| `npm test` | Run automated regression tests |
+| `npm run build` | Compile TypeScript into `dist/` |
+| `npm run check` | Validate source and contract, run backend tests, and build |
+| `npm run test:e2e` | Check desktop/mobile browser workflows against an isolated API |
+| `npm run verify` | Run checks, browser workflows, and acceptance demonstration |
+| `npm run demo` | Run deterministic acceptance scenarios |
+| `npm start` / `npm run worker` | Run the compiled API / worker |
+| `npm run admin -- --email ACCOUNT_EMAIL` | Give an existing account platform administration; operator action |
 
 ## Configuration
 
-| Variable | Default / purpose |
+Copy the example once and keep secrets in `.env` or the host's secret settings. Do not replace an existing environment file when updating the project.
+
+| Variable | Default and meaning |
 | --- | --- |
-| NODE_ENV | development; production requires HTTPS public URL |
-| PORT | 3000 |
-| MONGODB_URI | Local replica-set URI; secret when it includes credentials |
-| MONGODB_DATABASE | status_pulse |
-| PUBLIC_BASE_URL | http://localhost:3000; deployed HTTPS origin in production |
-| WORKER_CONCURRENCY | 4, allowed 1–16 |
-| WORKER_POLL_MS | 1000, allowed 250–60000 |
-| SESSION_TTL_HOURS | 24, allowed 1–168 |
-| ENABLE_SIMULATIONS | true; false disables simulator paths, not an automatic real-provider switch |
+| `NODE_ENV` | `development`; production requires an HTTPS public URL |
+| `PORT` | `3000` |
+| `MONGODB_URI` | Local replica set on `127.0.0.1:27018`; use a secret URI for Atlas |
+| `MONGODB_DATABASE` | `status_pulse` |
+| `PUBLIC_BASE_URL` | `http://localhost:3000`; actual HTTPS origin when hosted |
+| `WORKER_CONCURRENCY` | `4`; allowed range 1–16 |
+| `WORKER_POLL_MS` | `1000`; allowed range 250–60000 |
+| `SESSION_TTL_HOURS` | `24`; allowed range 1–168 |
+| `ENABLE_SIMULATIONS` | `true`; disabling this does not configure real providers |
 
-Index migration is rerunnable and also runs during database connection startup. Database constraints enforce unique emails, memberships, job slots/results, alerts, subscriptions, and payment keys. Future schema changes need explicit migrations; do not erase collections to fix an error.
+## How the project is organised
 
-## Design and remaining work
+```text
+src/       API, domain rules, database setup, monitoring, and worker
+public/    Browser dashboard, styles, and static assets
+tests/     API, business, monitoring, network-safety, and failure regressions
+scripts/   Local startup, migration, administration, demo, and contract checks
+docs/      Requirements, architecture, workflow, deployment, and final delivery
+```
 
-[Requirements](docs/requirements.md) and [week 1 analysis](docs/week-1-analysis.md) contain stories, acceptance criteria, roles, data model, and architecture tradeoffs.
+The frontend uses HTML, CSS, and JavaScript served by Express. The backend uses Node.js 24, TypeScript, Express 5, and the native MongoDB driver. There is no separate frontend development server or additional frontend build step.
 
-Durable leases and unique keys prevent duplicate authoritative records; transactions keep results/status/incidents/alerts consistent. A crash after sending HTTP can cause a repeated request: the claim is one authoritative stored outcome per job, not universal exactly-once external execution.
+Start with the [workflow overview](docs/workflow-overview.md) for a plain-language tour. Read the [architecture analysis](docs/week-1-analysis.md) for data and reliability decisions, the [requirements](docs/requirements.md) for the full acceptance criteria, and the [deployment guide](docs/deployment.md) for native, Docker, or hosted operation. The [final delivery report](docs/final-delivery.md) includes the week 5–6 work, verification record, demo sequence, and presentation outline.
 
-Historical resources are archived. The single-node development replica set is not highly available. Simulations are not real provider integrations. Weeks 5–6 and actual hosted verification remain separate work. Docker files are supplied but were not executed in this Windows workspace because no Docker engine was available.
+## Boundaries that matter
+
+Monitoring accepts GET/HEAD to public HTTP/HTTPS destinations. Private and reserved network addresses, URL credentials, and redirects are blocked. Raw endpoint URLs stay out of public output. Changes use server-side authorization and revision checks so stale edits cannot silently overwrite newer work.
+
+Durable jobs, leases, unique indexes, and transactions provide one authoritative stored result per job. A crash after an HTTP request can cause that request to be sent again. Historical resources are archived rather than erased. Local single-node MongoDB supports transactions but is not highly available.
+
+Docker and Render configuration are included. Those files do not prove a live deployment; hosted API, database, and worker verification must be recorded against the deployed revision. Real email, payment processing, multi-region monitoring, and automatic remediation remain outside this coursework scope.

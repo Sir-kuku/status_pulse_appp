@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11182b">
+  <meta name="description" content="Status Pulse — monitor your services, manage incidents, and keep your users informed.">
+  <title>Status Pulse · Monitoring workspace</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/theme.css">
+  <script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <div id="auth-screen" class="auth-layout">
+    <section class="welcome">
+      <a class="brand" href="/" aria-label="Status Pulse home"><span class="brand-icon">ϟ</span>Status<span>Pulse</span></a>
+      <div class="welcome-content"><p class="eyebrow"><span class="tiny-dot"></span> MONITOR. RESPOND. REASSURE.</p><h1>Know what’s up.<br>Be ready when<br><em>it’s down.</em></h1><p class="welcome-description">Your services, incidents, and response.<br>One workspace. A clearer picture.</p>
+      <div class="welcome-features"><div><span class="feature-icon">↗</span><div><strong>Keep an eye on every service</strong><p>HTTP checks and availability history</p></div></div><div><span class="feature-icon">◎</span><div><strong>Turn incidents into action</strong><p>Updates, alerts, and a clear path to resolution</p></div></div><div><span class="feature-icon">◈</span><div><strong>Keep your users in the loop</strong><p>Share a public page for your services</p></div></div></div></div>
+      <div class="signal-art" aria-hidden="true"><span class="signal-label">A clearer signal. A calmer response.</span><svg viewBox="0 0 480 82" fill="none"><path class="signal-baseline" d="M0 41H480"/><path class="signal-wave" d="M0 41H68L80 35L91 48L102 41H160L175 41L187 15L205 68L222 28L236 41H292L304 36L317 47L328 41H480"/></svg><div class="signal-endpoints"><span>MONITOR</span><span>RESPOND</span><span>REASSURE</span></div></div>
+      <p class="welcome-footer"><span class="tiny-dot"></span> Clarity when it matters.</p>
+    </section>
+    <section class="auth-panel"><div class="auth-card"><span class="label">YOUR MONITORING WORKSPACE</span><h2 id="auth-title">Let’s get you set up.</h2><p id="auth-description" class="muted">Create an account to start managing your services.</p><div class="auth-tabs" role="group" aria-label="Account access"><button type="button" id="register-tab" class="selected" aria-pressed="true">Create account</button><button type="button" id="login-tab" aria-pressed="false">Sign in</button></div>
+      <form id="auth-form"><label id="name-field">Your name<input name="name" autocomplete="name" placeholder="e.g. Kuku" required maxlength="100"></label><label>Email address<input name="email" type="email" autocomplete="email" placeholder="you@example.com" required maxlength="254"></label><label>Password<input id="password" name="password" type="password" autocomplete="new-password" placeholder="At least 15 characters" minlength="15" maxlength="128" required aria-describedby="password-hint"></label><p id="password-hint" class="field-hint">Use a passphrase of at least 15 characters.</p><p id="auth-error" class="form-error" role="alert" hidden></p><button id="auth-submit" class="button primary wide" type="submit">Create your account <span>→</span></button></form><p class="auth-note">Your next incident deserves a clearer response. Bring your services and your team together.</p><a class="text-link" href="/docs" target="_blank" rel="noopener">Explore the API documentation ↗</a></div><p class="auth-bottom">Status Pulse <span>Service reliability, made visible.</span></p></section>
+  </div>
+  <div id="workspace" class="workspace" hidden>
+    <button id="sidebar-backdrop" class="sidebar-backdrop" aria-label="Close navigation" hidden></button>
+    <aside id="sidebar" class="sidebar"><a class="brand" href="/" aria-label="Status Pulse home"><span class="brand-icon">ϟ</span>Status<span>Pulse</span></a><p class="nav-label">WORKSPACE</p><div class="project-picker"><select id="project-select" aria-label="Select a project"></select><button id="new-project" class="icon-button" title="Create project" aria-label="Create project">+</button></div><nav id="navigation" aria-label="Main navigation"></nav><button class="nav-item join-project" data-action="accept-invite">↳ Join a project</button><div class="sidebar-note"><span class="tiny-dot"></span><strong>Ready for the next response.</strong><p>Keep your services and your team on the same page.</p><span class="sidebar-note-line" aria-hidden="true"></span></div><div class="account"><span id="avatar" class="avatar"></span><div><strong id="account-name"></strong><span id="account-role"></span></div><button id="logout" class="icon-button" title="Sign out" aria-label="Sign out">↪</button></div></aside>
+    <div class="main-wrap"><header class="topbar"><div class="topbar-left"><button id="sidebar-toggle" class="mobile-menu icon-button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Overview</strong></span></div><div class="topbar-right"><span id="connection" class="connection">Connecting…</span><a href="/docs" target="_blank" rel="noopener" class="docs-link">API docs ↗</a></div></header><main id="main" tabindex="-1"><div id="page-heading" class="page-heading"></div><div id="page-content"></div></main><footer class="app-footer"><span><span class="footer-mark" aria-hidden="true">ϟ</span> Status Pulse <span class="footer-description">· Your service reliability workspace</span></span><span id="last-sync">Waiting for data</span></footer></div>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="dialog-header"><h2 id="modal-title"></h2><button id="close-modal" class="close-button" aria-label="Close dialog">×</button></div><div id="modal-body"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><p class="no-script">Enable JavaScript to use the Status Pulse dashboard. <a href="/docs">API documentation</a> is also available.</p></noscript>
+</body>
+</html>

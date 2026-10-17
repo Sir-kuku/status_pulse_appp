@@ -1,6 +1,8 @@
 import { ObjectId, type ClientSession, type Document } from 'mongodb';
 import { type AppContext, transaction } from './core.js';
 
+const MAX_AUTOMATIC_ATTEMPTS = 3;
+
 /** Records simulated email outcomes atomically. No SMTP delivery is claimed. */
 export async function deliverPendingAlerts(ctx: AppContext, options: {
   simulateFailure?: boolean; alertId?: ObjectId; force?: boolean; limit?: number;
@@ -13,7 +15,10 @@ export async function deliverPendingAlerts(ctx: AppContext, options: {
     const result = await transaction(ctx, async session => {
       const filter: Document = { deliveryState: { $in: ['pending', 'failed'] }, _id: { $nin: seen } };
       if (options.alertId) filter._id = options.alertId;
-      if (!options.force) filter.$or = [{ nextAttemptAt: { $exists: false } }, { nextAttemptAt: { $lte: ctx.now() } }];
+      if (!options.force) filter.$and = [
+        { $or: [{ attempts: { $exists: false } }, { attempts: { $lt: MAX_AUTOMATIC_ATTEMPTS } }] },
+        { $or: [{ nextAttemptAt: { $exists: false } }, { nextAttemptAt: { $lte: ctx.now() } }] },
+      ];
       const alert = await ctx.db.collection('alerts').findOne(filter, { session, sort: { createdAt: 1, _id: 1 } });
       if (!alert) return null;
       const createdAt = ctx.now();
@@ -23,10 +28,15 @@ export async function deliverPendingAlerts(ctx: AppContext, options: {
       const changes: Document = { $set: { deliveryState: outcome, attempts: attempt, simulation: true } };
       if (failed) {
         changes.$set.lastError = 'Simulated delivery failure.';
-        changes.$set.nextAttemptAt = new Date(createdAt.getTime() + Math.min(3600000, 1000 * 2 ** Math.min(attempt, 12)));
+        if (attempt < MAX_AUTOMATIC_ATTEMPTS) {
+          changes.$set.nextAttemptAt = new Date(createdAt.getTime() + 1000 * 2 ** attempt);
+        } else {
+          changes.$set.retryExhaustedAt = createdAt;
+          changes.$unset = { nextAttemptAt: '' };
+        }
       } else {
         changes.$set.deliveredAt = createdAt;
-        changes.$unset = { lastError: '', nextAttemptAt: '' };
+        changes.$unset = { lastError: '', nextAttemptAt: '', retryExhaustedAt: '' };
       }
       await ctx.db.collection('alerts').updateOne({ _id: alert._id }, changes, { session });
       await ctx.db.collection('alertAttempts').insertOne({ alertId: alert._id, attempt, outcome, createdAt, simulation: true,

@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Status Pulse is a backend monitoring platform. Teams register HTTP services, run scheduled checks, calculate availability, investigate incidents, receive and acknowledge alerts, and share selected information through public status pages. Visitors can subscribe to public services. An advanced monitoring plan uses simulated payments only.
+Status Pulse is a monitoring platform with a browser dashboard and an HTTP API. Teams register HTTP services, run scheduled checks, calculate availability, investigate incidents, receive and acknowledge alerts, and share selected information through public status pages. Visitors can subscribe to public services. An advanced monitoring plan uses simulated payments only.
 
-The engineering goal is a system whose behavior can be explained and verified, including failures, retries, concurrent workers, and unauthorized access. These requirements describe intended behavior; they do not claim that every feature is implemented or tested.
+The engineering goal is a system whose behavior can be explained and verified, including failures, retries, concurrent workers, and unauthorized access. The original SP, US, and AC identifiers are retained so the final work can be reviewed against the same requirements. The implementation map below identifies relevant source and tests; execution results belong in the final delivery report.
 
 ## Delivery boundary
 
-The current delivery target is **weeks 1–4**. Weeks 5–6 remain a later stage. Tests, documentation, security, and reliability accompany each feature during weeks 1–4.
+The delivery scope now covers **weeks 1–6**, including the final dashboard, reliability review, documentation, demonstration, and presentation material. Tests, security, and reliability remain part of each feature rather than a last-week exercise.
 
 | Week | Intended outcome | Evidence to collect |
 | --- | --- | --- |
@@ -16,8 +16,8 @@ The current delivery target is **weeks 1–4**. Weeks 5–6 remain a later stage
 | 2 | Accounts, project permissions, service configuration, and reliable scheduled checks (SP-01–SP-03) | Running API/worker, database setup, automated tests, and example requests |
 | 3 | Status calculation, thresholds, history, overrides, and incident lifecycle (SP-04–SP-05) | Failure/recovery, stale results, state transition, and duplicate-processing tests |
 | 4 | Alerts/acknowledgements, safe public status, subscriptions, simulated payment, and integration (SP-06–SP-07 plus supporting SP-08 audit) | Integrated scenarios, failure/retry evidence, API documentation, and shared/test deployment verification |
-| 5 — later | Broader regression/failure testing, reliability hardening, and documentation review | Expanded evidence and reviewed limitations |
-| 6 — later | Final implementation review, complete demonstration, presentation, and delivery | Final demo and explanation of technical decisions |
+| 5 | Regression/failure testing, reliability hardening, responsive frontend, and documentation review | Failure/concurrency regression tests, UI checks, updated architecture and requirements |
+| 6 | Final implementation review, demonstration, presentation, and delivery | Final verification report, workflow overview, demo walkthrough, and presentation outline |
 
 Shared/test deployment is complete only after the deployed API and worker have been checked. Local success alone does not prove deployment.
 
@@ -41,9 +41,9 @@ Authentication identifies the caller. Authorization decides what that caller can
 
 No role may read password hashes, session-token hashes, verification-token hashes, or endpoint credentials in API responses. Administration is a separately provisioned operational role; registration cannot request it. Owner permissions include responder actions. Owner transfer/removal is outside v1; ordinary invitations cannot grant owner status.
 
-## Proposed v1 policies
+## V1 policies
 
-These are the selected initial policies for implementation, not additional coursework requirements or claims of completed behavior. Keep code, API documentation, and tests aligned if they change.
+These policies make the acceptance criteria precise. They are project design decisions, not additional requirements attributed to an unseen marking rubric. Keep code, API documentation, and tests aligned when they change.
 
 - Use Node.js 24, TypeScript, Express 5, and the native MongoDB driver in one modular application. Run the HTTP API separately from the MongoDB-backed scheduler/worker process. Use a MongoDB replica set for multi-document transactions.
 - Signup requires a name of 1–100 characters and a password of 15–128 characters, without composition rules. Trim and lowercase email for identity comparison; enforce normalized uniqueness in the database. Store passwords with a suitable salted, one-way password hash.
@@ -184,7 +184,7 @@ A failed HTTP observation is a completed result. Infrastructure retries must not
 | AC-07.7 | Retry succeeds and successful request repeats | Plan activation commits once; attempt history retained |
 | AC-07.8 | Idempotency key reused with conflicting input | Reject conflict instead of applying unrelated operation |
 
-Initial public presentation can be an API plus a small safe HTML status page; a full dashboard is not required. Simulation sends no real email and moves no real money, which responses and documentation must state.
+The original backend baseline allowed a small public status page. The final delivery also includes the requested team dashboard and a styled public experience. Simulation sends no real email and moves no real money, which responses and documentation must state.
 
 ## SP-08 — Reliability, audit, and administration
 
@@ -221,6 +221,62 @@ Initial public presentation can be an API plus a small safe HTML status page; a 
 - Maintain README/setup, environment, migration, API, testing, architecture, limitations, and deployment documentation as work progresses.
 - Exclude full APM, centralized logging platforms, infrastructure agents, SMS/telephone paging, real payments, multi-region runners, automatic remediation, custom domains, and DNS management.
 
+## Frontend and final delivery criteria
+
+These criteria capture the final request without changing the meaning of the original backend requirements.
+
+| ID | Required result | Review method |
+| --- | --- | --- |
+| UI-01 | Account access, project selection, monitor management, incidents, alerts, members, plan simulation, and settings use the real API | Browser walkthrough and API integration tests |
+| UI-02 | A consistent responsive interface uses clear typography, status colours, hover feedback, transitions, and restrained glow effects | Desktop and narrow-screen inspection |
+| UI-03 | Forms have labels, keyboard focus remains visible, errors are understandable, and reduced-motion preferences are respected | Keyboard and reduced-motion browser review |
+| UI-04 | Loading, empty, failed, unknown, paused, and live-data states communicate what actually happened | Empty-project, stopped-worker, and failed-request walkthroughs |
+| UI-05 | Public presentation retains safe projections and supports the subscription flow without exposing private data | Public-route regression tests and anonymous browser review |
+| DEL-01 | Setup, configuration, architecture, workflow, API, deployment, and limitations match the final implementation | Documentation review and link check |
+| DEL-02 | Every SP/AC identifier remains traceable; final checks and demo evidence are recorded honestly | Matrix below and final delivery report |
+| DEL-03 | Demonstration and presentation explain the full workflow, failure behavior, and the six-week progression | Final demo and presentation guide |
+| DEL-04 | Generated output, credentials, local databases, dependency directories, and temporary tooling stay outside the submission | Ignore rules and repository status review |
+
+## Implementation and verification map
+
+Use this table to locate the evidence rather than treating it as a blanket pass. Test names describe the behavior being exercised; the dated [verification record](final-delivery.md#verification-record) states which commands actually completed. Source paths are relative to the repository root.
+
+Test groups: **API** = [api.test.ts](../tests/api.test.ts), **Business** = [business.test.ts](../tests/business.test.ts), **Monitoring** = [monitoring.test.ts](../tests/monitoring.test.ts), **Endpoint** = [endpoint-checker.test.ts](../tests/endpoint-checker.test.ts), **Startup** = [startup-error.test.ts](../tests/startup-error.test.ts), **Browser** = [workflows.spec.ts](../tests/browser/workflows.spec.ts). The integrated [demo](../scripts/demo.ts) uses controlled outcomes and an isolated replica set.
+
+| Requirement / acceptance criteria | Implementation | Relevant verification |
+| --- | --- | --- |
+| SP-01 / AC-01.1, AC-01.2 | `auth-routes.ts`, `core.ts`, session/email indexes in `db.ts` | API account validation, normalization, password/token hashing, login failure, expiry, and logout |
+| SP-01 / AC-01.3, AC-01.4 | `project-routes.ts`, transactional project/membership creation, invitations | API project membership, invitation reissue/expiry, roles, and project creation; transaction review |
+| SP-01 / AC-01.5, AC-01.6 | Scoped membership middleware, strict schemas, separate admin provisioning | API cross-project isolation and signup mass assignment; Business outsider denial; no owner-grant invitation schema |
+| SP-02 / AC-02.1, AC-02.3, AC-02.4 | `service-routes.ts`, immutable `serviceVersions`, audit and revision conditions | API configuration validation, role denial, preserved PATCH values, stale/concurrent edits; Monitoring configuration changes during execution |
+| SP-02 / AC-02.2 | Service schema and `endpoint-checker.ts` | API unsafe URL/range/plan validation; Endpoint literal, DNS, protocol, credential, redirect, and deadline tests |
+| SP-02 / AC-02.5 | Service archival; scheduler and pre-execution eligibility checks | API archival preserves history and denies disabled manual checks; Monitoring queued ineligible-job regression |
+| SP-02 / AC-02.6 | `public-routes.ts`, public HTML projection, subscription validation | Business public visibility, hidden IDs, and private subscription selections |
+| SP-03 / AC-03.1 | `monitoring.ts`, unique job dispatch key in `db.ts` | Monitoring concurrent schedulers and missed-slot coalescing |
+| SP-03 / AC-03.2 | Conditional lease claims and completion fencing | Monitoring parallel workers and expired-lease replacement |
+| SP-03 / AC-03.3, AC-03.6 | `endpoint-checker.ts`, immutable check results | Endpoint DNS pinning, safe TLS hostname, failures, redirects, timeout, and response-body bounds |
+| SP-03 / AC-03.4 | Worker concurrency and per-check deadline | Monitoring slow/fast job independence; Endpoint deadline tests |
+| SP-03 / AC-03.5 | Retry attempts, bounded backoff, failed-job reaping, unique result key | Monitoring internal failures, replacement leases, final crashed lease, and transactional rollback |
+| SP-04 / AC-04.1, AC-04.2, AC-04.3 | `calculateStatus` and persisted counters in `monitoring.ts` | Monitoring initial health, failure threshold, partial recovery, slow success, and counter reset |
+| SP-04 / AC-04.4, AC-04.5 | `effectiveStatus`, observation ordering, stale maintenance | Monitoring unknown/stale state, parallel result prevention, and late observations |
+| SP-04 / AC-04.6, AC-04.7 | Service override routes and expiry/history maintenance | API override roles/expiry/privacy; Monitoring underlying failure counting and expiry audit |
+| SP-05 / AC-05.1 | `incident-routes.ts`, automatic outage creation, active-incident index | Business one active incident; Monitoring automatic/manual incident deduplication |
+| SP-05 / AC-05.2, AC-05.3 | Incident lifecycle/version transaction and update records | Business sequential lifecycle, skipped transition denial, and concurrent versions |
+| SP-05 / AC-05.4, AC-05.5 | Safe incident/update projection; recovery evidence without resolution | Business public/internal update separation; Monitoring partial recovery and unresolved incidents |
+| SP-06 / AC-06.1, AC-06.2 | Alert deduplication keys and `delivery.ts` | Monitoring outage alert count; Business concurrent delivery |
+| SP-06 / AC-06.3 | Durable delivery attempts, bounded automatic retry, authorized explicit retry | Business failed delivery, retry history, exhaustion, and disabled simulation |
+| SP-06 / AC-06.4, AC-06.5 | Role-gated conditional acknowledgement | Business idempotent/concurrent acknowledgement and viewer denial; failed delivery remains unacknowledged |
+| SP-07 / AC-07.1, AC-07.2 | `public-routes.ts` allowlists and escaped public presentation | Business service/incident/history privacy; API HTML escaping and disabled public project |
+| SP-07 / AC-07.3, AC-07.4 | Subscription uniqueness, token hashes, expiry, verification | Business normalized/concurrent subscriptions, single verification, replay, and production expiry |
+| SP-07 / AC-07.5 | Selection/visibility recheck during notification | Business unverified/private-service non-delivery and selected-service deduplication |
+| SP-07 / AC-07.6, AC-07.7, AC-07.8 | Transactional simulated payment and unique project/idempotency key | Business failed payment, concurrent success, replay, conflicting input, and disabled simulation |
+| SP-08 / AC-08.1 | Operational events, attempts, worker heartbeats, startup diagnostics | Monitoring exhausted checks; Business delivery attempts; Startup safe diagnostics |
+| SP-08 / AC-08.2 | Audit writes inside domain transactions; project/admin audit routes | API configuration/permissions; Monitoring override/lease failure audit; Business single plan activation |
+| SP-08 / AC-08.3 | `transaction` helper, conditional writes, indexes | Monitoring injected later-write failure and full rollback; Business payment/incident race invariants |
+| SP-08 / AC-08.4, AC-08.5 | Separate platform role, safe errors/health/startup logging | API unauthorized administration and health; Startup redaction of credentials, input, and database documents |
+| UI-01–UI-05 | `public/`, dashboard routes, safe public page | API asset/privacy tests; Browser owner, membership, public subscription/privacy, mobile/reduced-motion, and failed-load/expiry workflows |
+| DEL-01–DEL-04 | README, `docs/`, scripts, deployment and ignore files | Documentation review, final check/demo commands, repository review |
+
 ## Delivery status
 
-This is a requirements baseline. A criterion becomes verified only when execution evidence exists. Implementation and deployment status must be recorded separately; a written requirement is not a passed test.
+The [final delivery report](final-delivery.md) separates implementation, executed checks, browser review, and external deployment. A written requirement, existing test, or deployment manifest alone does not prove that its execution passed. The available baseline is this repository; any separate institutional marking rubric should be checked against it before submission.

@@ -31,5 +31,5 @@ try {
   process.on('message', message => { if (message === 'shutdown') void stop(); });
   worker.once('error', error => { console.error(`Worker launch failed (${error.name}).`); process.exitCode = 1; void stop(); });
   worker.once('exit', () => { if (!closing) { console.error('Worker stopped unexpectedly.'); process.exitCode = 1; void stop(); } });
-  console.log(`Status Pulse running: http://localhost:${config.port}/docs — Ctrl+C stops API, worker, and database while preserving data.`);
+  console.log(`Status Pulse running: http://localhost:${config.port}/ — Ctrl+C stops API, worker, and database while preserving data.`);
 } catch (error) { await replica.stop({ doCleanup: false }); throw error; }

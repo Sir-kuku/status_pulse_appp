@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build --chown=node:node /app/dist/src ./dist/src
 COPY --chown=node:node docs ./docs
+COPY --chown=node:node public ./public
 USER node
 EXPOSE 3000
 CMD ["node", "dist/src/server.js"]

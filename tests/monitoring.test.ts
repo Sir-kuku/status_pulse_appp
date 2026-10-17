@@ -79,6 +79,49 @@ describe('transactional monitoring', () => {
     assert.equal(await ctx.db.collection('checkResults').countDocuments(), 1);
   });
 
+  for (const change of ['disabled', 'archived_service', 'archived_project', 'configuration_changed'] as const) {
+    test(`queued work is cancelled before HTTP when ${change}`, async () => {
+      const job = await enqueueManualCheck(ctx, service, actorId);
+      if (change === 'disabled') await ctx.db.collection('services').updateOne({ _id: service._id }, { $set: { enabled: false } });
+      else if (change === 'archived_service') await ctx.db.collection('services').updateOne({ _id: service._id }, { $set: { archivedAt: now } });
+      else if (change === 'archived_project') await ctx.db.collection('projects').updateOne({ _id: service.projectId }, { $set: { archivedAt: now } });
+      else await ctx.db.collection('services').updateOne({ _id: service._id }, { $inc: { configVersion: 1 } });
+      let checks = 0;
+      assert.equal(await runNextCheck(ctx, async () => { checks++; return failed; }), true);
+      assert.equal(checks, 0, 'an ineligible queued job must not contact its former endpoint');
+      const cancelled = await ctx.db.collection('checkJobs').findOne({ _id: job._id });
+      assert.equal(cancelled?.state, 'cancelled');
+      assert.equal(cancelled?.cancellationReason, change.startsWith('archived') ? 'archived' : change);
+      assert.equal(cancelled?.leaseToken, undefined);
+      assert.equal(await ctx.db.collection('checkResults').countDocuments(), 0, 'cancellation must not fabricate endpoint evidence');
+      assert.equal(await ctx.db.collection('auditEvents').countDocuments({ action: 'check.cancelled' }), 1);
+      assert.equal(await runNextCheck(ctx, async () => { checks++; return healthy; }), false);
+    });
+  }
+
+  test('a slow endpoint does not block another worker completing an unrelated service', async () => {
+    await enqueueManualCheck(ctx, service, actorId);
+    const other = { ...service, _id: new ObjectId(), name: 'Other API' };
+    await ctx.db.collection('services').insertOne(other);
+    let started!: () => void;
+    let release!: (outcome: CheckOutcome) => void;
+    const startedPromise = new Promise<void>(resolve => { started = resolve; });
+    const slow = runNextCheck(ctx, async () => {
+      started();
+      return new Promise(resolve => { release = resolve; });
+    });
+    await startedPromise;
+    try {
+      await enqueueManualCheck(ctx, other, actorId);
+      assert.equal(await runNextCheck(ctx, async () => healthy), true);
+      assert.equal(await ctx.db.collection('checkResults').countDocuments({ serviceId: other._id, success: true }), 1);
+      assert.equal(await ctx.db.collection('checkResults').countDocuments({ serviceId: service._id }), 0);
+    } finally {
+      release({ ...failed, httpStatus: null, failureReason: 'timeout' });
+      await slow;
+    }
+  });
+
   test('threshold outage creates one incident and alert; recovery records evidence without resolving the incident', async () => {
     await ctx.db.collection('subscriptions').insertOne({ projectId: service.projectId, email: 'viewer@example.com',
       serviceIds: [service._id], verifiedAt: now });
@@ -111,6 +154,21 @@ describe('transactional monitoring', () => {
     await run(healthy);
     assert.equal(await ctx.db.collection('incidents').countDocuments({ active: true }), 1);
     assert.equal((await ctx.db.collection('incidents').findOne({}))?.lastMonitorStatus, 'recovered');
+  });
+
+  test('failed checks after a configuration reset cannot announce incident recovery', async () => {
+    for (let n = 0; n < 3; n++) await run(failed);
+    await ctx.db.collection('services').updateOne({ _id: service._id }, { $set: {
+      calculatedStatus: 'unknown', observedStatus: 'unknown', failureStreak: 0, successStreak: 0,
+    }, $inc: { configVersion: 1 }, $unset: { lastCheckedAt: '', lastProcessedDueAt: '', lastProcessedJobId: '' } });
+    assert.equal((await run(failed)).calculatedStatus, 'degraded');
+    assert.equal((await ctx.db.collection('incidents').findOne({}))?.lastMonitorStatus, 'outage');
+    assert.equal(await ctx.db.collection('incidentUpdates').countDocuments(), 1);
+    await run(healthy);
+    assert.equal((await ctx.db.collection('incidents').findOne({}))?.recoveryDetectedAt, undefined);
+    await run(healthy);
+    assert.equal((await ctx.db.collection('incidents').findOne({}))?.lastMonitorStatus, 'recovered');
+    assert.equal(await ctx.db.collection('incidentUpdates').countDocuments(), 2);
   });
 
   test('existing manual incident receives the deduped outage alert and is not automatically resolved', async () => {
@@ -208,6 +266,32 @@ describe('transactional monitoring', () => {
     assert.equal(await runNextCheck(ctx, async () => { throw new Error('must not execute'); }), false);
     assert.equal((await ctx.db.collection('checkJobs').findOne({ _id: job._id }))?.state, 'failed');
     assert.equal(await ctx.db.collection('operationalEvents').countDocuments({ reason: 'attempts_exhausted' }), 1);
+  });
+
+  test('a later database write failure rolls back completion and all derived state before a safe lease retry', async () => {
+    await ctx.db.collection('services').updateOne({ _id: service._id }, { $set: {
+      failureStreak: 2, calculatedStatus: 'degraded', observedStatus: 'degraded',
+    } });
+    const job = await enqueueManualCheck(ctx, service, actorId);
+    // Fail a real MongoDB write late in finishJob, after result/status/incident writes.
+    await ctx.db.command({ collMod: 'alerts', validator: { $jsonSchema: { required: ['regressionRequiredField'] } } });
+    try {
+      await assert.rejects(runNextCheck(ctx, async () => failed), (error: unknown) => (error as { code?: number }).code === 121);
+    } finally {
+      await ctx.db.command({ collMod: 'alerts', validator: {} });
+    }
+    assert.equal((await ctx.db.collection('checkJobs').findOne({ _id: job._id }))?.state, 'leased');
+    assert.equal((await ctx.db.collection('services').findOne({ _id: service._id }))?.failureStreak, 2);
+    for (const name of ['checkResults', 'statusHistory', 'incidents', 'incidentUpdates', 'alerts']) {
+      assert.equal(await ctx.db.collection(name).countDocuments(), 0, `${name} must roll back with the failed completion`);
+    }
+    assert.equal(await ctx.db.collection('auditEvents').countDocuments({ action: 'incident.auto_created' }), 0);
+    advance(121_000);
+    assert.equal(await runNextCheck(ctx, async () => failed), true);
+    assert.equal((await ctx.db.collection('checkJobs').findOne({ _id: job._id }))?.state, 'done');
+    assert.equal(await ctx.db.collection('checkResults').countDocuments(), 1);
+    assert.equal(await ctx.db.collection('incidents').countDocuments(), 1);
+    assert.equal(await ctx.db.collection('alerts').countDocuments(), 1);
   });
 
   test('overrides preserve real failure counting; expiry and stale visibility are audited without erasing calculation', async () => {

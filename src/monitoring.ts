@@ -82,7 +82,7 @@ async function incidentUpdate(ctx: AppContext, session: ClientSession, service: 
   await notifyPublicIncidentUpdate(ctx, session, update);
 }
 
-async function updateAutomaticIncident(ctx: AppContext, session: ClientSession, service: Document, next: ServiceStatus) {
+async function updateAutomaticIncident(ctx: AppContext, session: ClientSession, service: Document, next: ServiceStatus, recoveryReached: boolean) {
   const now = ctx.now();
   if (next === 'outage') {
     let incident = await ctx.db.collection('incidents').findOne({ serviceId: service._id, active: true }, { session });
@@ -101,7 +101,7 @@ async function updateAutomaticIncident(ctx: AppContext, session: ClientSession, 
       _id: new ObjectId(), projectId: service.projectId, serviceId: service._id, incidentId: incident._id,
       dedupeKey: `outage:${incident._id}`, kind: 'outage', deliveryState: 'pending', attempts: 0, createdAt: now,
     } }, { upsert: true, session });
-  } else if (next === 'operational' || next === 'degraded') {
+  } else if (recoveryReached && (next === 'operational' || next === 'degraded')) {
     const incident = await ctx.db.collection('incidents').findOneAndUpdate({ serviceId: service._id, active: true, lastMonitorStatus: 'outage' },
       { $set: { lastMonitorStatus: 'recovered', recoveryDetectedAt: now, updatedAt: now }, $inc: { version: 1 } }, { session, returnDocument: 'after' });
     if (incident) {
@@ -137,16 +137,22 @@ function validOutcome(value: CheckOutcome): boolean {
     && (value.failureReason === null || (typeof value.failureReason === 'string' && value.failureReason.length <= 100));
 }
 
+function ineligibleReason(job: Document, service: Document | null, project: Document | null): string | null {
+  if (!service || service.archivedAt || !project) return 'archived';
+  if (!service.enabled) return 'disabled';
+  if (service.configVersion !== job.configVersion) return 'configuration_changed';
+  return null;
+}
+
 async function finishJob(ctx: AppContext, job: Document, outcome: CheckOutcome): Promise<void> {
   await transaction(ctx, async session => {
     const now = ctx.now();
     const claimed = await ctx.db.collection('checkJobs').updateOne({ _id: job._id, state: 'leased', leaseToken: job.leaseToken, leaseUntil: { $gt: now } },
       { $set: { state: 'done', finishedAt: now }, $unset: { leaseToken: '', leaseUntil: '' } }, { session });
     if (!claimed.modifiedCount) return; // An expired/fenced worker cannot commit a result.
-    const service = await ctx.db.collection('services').findOne({ _id: job.serviceId }, { session });
+    const service = await ctx.db.collection('services').findOne({ _id: job.serviceId, projectId: job.projectId }, { session });
     const project = await ctx.db.collection('projects').findOne({ _id: job.projectId, archivedAt: { $exists: false } }, { session });
-    let skipReason: string | null = !service || service.archivedAt || !project ? 'archived' : !service.enabled ? 'disabled'
-      : service.configVersion !== job.configVersion ? 'configuration_changed' : null;
+    let skipReason = ineligibleReason(job, service, project);
     if (!skipReason && service?.lastProcessedDueAt) {
       const previous = new Date(service.lastProcessedDueAt).getTime();
       const due = new Date(job.dueAt).getTime();
@@ -167,7 +173,8 @@ async function finishJob(ctx: AppContext, job: Document, outcome: CheckOutcome):
     }, { session });
     await history(ctx, session, service, from, observedStatus, expiredOverride ? 'override_expired' : 'check_result', job._id);
     if (expiredOverride) await audit(ctx, session, { action: 'service.override_expired', projectId: service.projectId, resourceId: service._id, metadata: { restoredStatus: observedStatus } });
-    await updateAutomaticIncident(ctx, session, service, status.calculatedStatus);
+    await updateAutomaticIncident(ctx, session, service, status.calculatedStatus,
+      outcome.success && status.successStreak >= (service.recoveryThreshold ?? 2));
   });
 }
 
@@ -184,9 +191,23 @@ export async function runNextCheck(ctx: AppContext, checker: Checker = checkEndp
     { sort: { dueAt: 1, _id: 1 }, returnDocument: 'before', session });
     if (!previous) return null;
     if (previous.state === 'leased') await recordWorkerFailure(ctx, session, previous, 'lease_expired');
+    // Queued work can outlive a configuration change, disable or archive. Recheck
+    // eligibility before network access; cancellation is not a failed observation.
+    const service = await ctx.db.collection('services').findOne({ _id: previous.serviceId, projectId: previous.projectId }, { session });
+    const project = await ctx.db.collection('projects').findOne({ _id: previous.projectId, archivedAt: { $exists: false } }, { session });
+    const cancellationReason = ineligibleReason(previous, service, project);
+    if (cancellationReason) {
+      await ctx.db.collection('checkJobs').updateOne({ _id: previous._id, state: 'leased', leaseToken }, {
+        $set: { state: 'cancelled', cancellationReason, finishedAt: ctx.now() }, $unset: { leaseToken: '', leaseUntil: '' },
+      }, { session });
+      await audit(ctx, session, { action: 'check.cancelled', projectId: previous.projectId, resourceId: previous.serviceId,
+        metadata: { jobId: previous._id.toHexString(), reason: cancellationReason } });
+      return { ...previous, state: 'cancelled' };
+    }
     return { ...previous, state: 'leased', attempts: previous.attempts + 1, leaseToken, leaseUntil };
   });
   if (!job) return false;
+  if (job.state === 'cancelled') return true;
   let outcome: CheckOutcome;
   try {
     outcome = await checker(job.config as CheckConfig);

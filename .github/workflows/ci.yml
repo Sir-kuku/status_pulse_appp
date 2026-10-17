@@ -1,4 +1,4 @@
-name: Backend checks
+name: Project checks
 
 on:
   push:
@@ -26,6 +26,10 @@ jobs:
         run: npm ci
       - name: Typecheck, validate contract, test with isolated replica set, and build
         run: npm run check
+      - name: Install browser for workflow checks
+        run: npx playwright install --with-deps chromium
+      - name: Verify browser workflows and acceptance demonstration
+        run: npm run test:e2e && npm run demo
       - name: Validate local container configuration
         run: docker compose config --quiet
       - name: Build runtime image

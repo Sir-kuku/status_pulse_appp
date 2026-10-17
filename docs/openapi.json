@@ -3,7 +3,7 @@
   "info": {
     "title": "Status Pulse API",
     "version": "0.1.0",
-    "description": "Weeks 1–4 backend contract. Opaque bearer sessions protect project routes; roles are scoped to each project. Public routes explicitly exclude endpoint URLs, credentials, members, private notes, and configuration. Email/verification/payments are simulations only. No hosted deployment is asserted by this contract."
+    "description": "Complete weeks 1–6 API contract for the Status Pulse dashboard and public status pages. Opaque bearer sessions protect project routes; roles are scoped to each project. Public routes explicitly exclude endpoint URLs, credentials, members, private notes, and configuration. Email/verification/payments are simulations only. No hosted deployment is asserted by this contract."
   },
   "servers": [
     {
@@ -4309,7 +4309,8 @@
               "ready",
               "leased",
               "done",
-              "failed"
+              "failed",
+              "cancelled"
             ]
           },
           "dueAt": {
@@ -4744,6 +4745,11 @@
           "nextAttemptAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "retryExhaustedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Automatic delivery stops after three failed attempts. An owner or responder can explicitly retry. Cleared on successful delivery."
           },
           "simulation": {
             "type": "boolean"
