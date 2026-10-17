@@ -1,17 +1,43 @@
 # Connect real email and social sign-in
 
-The app is ready for Resend email, Google sign-in and GitHub sign-in. These features need accounts and credentials that belong to you. Until you connect them, manual registration and sign-in work, email actions explain that delivery is unavailable, and unconfigured social buttons stay hidden. The app never substitutes simulated email in production.
+The app is ready for Resend email, Google sign-in and GitHub sign-in. These features need accounts and credentials that belong to you. Until you connect them, manual registration and sign-in work, email actions explain that delivery is unavailable, and unconfigured social buttons stay hidden. Email defaults to disabled on both localhost and Render when no sender and key are configured. Simulated email requires an explicit local setting and is never allowed in production.
 
 Your current website is **https://status-pulse-appp.onrender.com**. Keep this exact address in `PUBLIC_BASE_URL` on Render. If you move to a custom domain later, update that value and both providers' callback URLs together.
 
-## 1. Connect a sending domain and Resend
+## Why localhost and Render can look different
 
-You need a domain whose DNS settings you control. The shared `onrender.com` domain belongs to Render, so you cannot verify it as your own email sending domain. Your website may keep its Render address while email comes from your own domain.
+The code is shared through GitHub, but configuration and data belong to each running environment. Localhost reads your local `.env`; Render reads its own **Environment** settings. `npm run local` also uses an isolated local database, so creating an account there does not create it on Render. Use the website where you created the account when requesting a password reset.
 
-1. Create a [Resend account](https://resend.com/signup).
-2. In **Domains**, add your sending domain or a dedicated subdomain. Add the DNS records Resend gives you, then wait for verification. Use the actual values shown in your account. Resend explains its SPF/DKIM setup in the [domain guide](https://resend.com/docs/dashboard/domains/introduction).
-3. Create an API key with sending access for that domain. Choose an address such as `notifications@your-domain.com`. The example is a placeholder; use your verified domain.
-4. Open the Status Pulse web service in Render, then **Environment**. Add the following values. Add the same email settings to the monitoring worker, if you have deployed it.
+Your browser saves its light/dark/system choice separately for each website address. Choosing dark mode on localhost does not change the saved choice on Render. Select your preference on each site. An older running local process also needs restarting after configuration changes.
+
+## 1. Send your first real email with Resend
+
+You can test delivery to your own inbox before buying or connecting a domain. Resend allows `onboarding@resend.dev` to send only to the email address associated with your Resend account. Team invitations and notifications to other recipients need your own verified sending domain. See Resend's [testing sender restrictions](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
+1. Create a [Resend account](https://resend.com/signup) using the email address where you want to receive the first test.
+2. Create an API key with sending access in the Resend dashboard.
+3. Open the Status Pulse web service in Render, then **Environment**, and add these values:
+
+| Variable | Value for your first inbox test |
+| --- | --- |
+| `PUBLIC_BASE_URL` | `https://status-pulse-appp.onrender.com` |
+| `EMAIL_MODE` | `resend` |
+| `EMAIL_FROM` | `Status Pulse <onboarding@resend.dev>` |
+| `RESEND_API_KEY` | Your private Resend sending key |
+
+4. Choose **Save, rebuild, and deploy**. When deployment finishes, open the Render website and create an account with the same email address used for Resend. If the account already exists, sign in and request verification from **Your account**, or use **Forgot password?** to test recovery.
+5. Check that inbox and its spam folder, then check Resend's email log. The testing sender cannot deliver to a teammate's different address; a rejection in that case is an expected provider restriction.
+
+Enter secrets directly in Render, never in GitHub, screenshots, or chat. If testing locally instead, put them in your untracked `.env`, keep `PUBLIC_BASE_URL=http://localhost:3000`, and restart the local server. Do not put the Render URL in local email settings unless the account and token were created on Render.
+
+### Enable email for everyone
+
+To send to teammates and customers, use a domain whose DNS settings you control. The shared `onrender.com` domain belongs to Render, so you cannot verify it as your own email sending domain. Your website may keep its Render address while email comes from your own domain.
+
+1. In Resend **Domains**, add your domain or a dedicated sending subdomain.
+2. Add the DNS records shown by Resend, then wait for verification. Use the actual values from your account; the [domain guide](https://resend.com/docs/dashboard/domains/introduction) explains SPF and DKIM.
+3. Ensure your API key can send from that domain. Choose an address such as `notifications@your-domain.com`.
+4. Replace the testing sender in Render with your verified sender. Configure the monitoring worker with the same email settings if you have deployed it.
 
 | Variable | Value |
 | --- | --- |
@@ -20,19 +46,26 @@ You need a domain whose DNS settings you control. The shared `onrender.com` doma
 | `EMAIL_FROM` | `Status Pulse <notifications@YOUR_VERIFIED_DOMAIN>` |
 | `RESEND_API_KEY` | Your private Resend sending key |
 
-Choose **Save, rebuild, and deploy** after setting the variables. Render documents that action in its [environment settings guide](https://render.com/docs/configure-environment-variables). Never put the real key in GitHub, a screenshot, or a chat message. Leave optional credential variables absent until you have their real values.
+Choose **Save, rebuild, and deploy** after updating the variables. Render documents that action in its [environment settings guide](https://render.com/docs/configure-environment-variables). Leave optional credential variables absent until you have their real values.
 
 Account verification, password resets, password-change notices, team invitations, public subscription verification and incident updates all use this provider. The API process drains the email queue as well as the worker, so account emails can send without waiting for a monitoring tick. Continuous monitoring still requires the worker. A sleeping free web service cannot process background work while asleep.
 
 ## 2. Enable Google sign-in
 
-In [Google Cloud Console](https://console.cloud.google.com/), create or select a project and configure Google Auth Platform with your app name, audience and contact details. Create an OAuth client of type **Web application**. Add this exact authorized redirect URI:
+Google sign-in has its own configuration; connecting Resend does not enable it. In [Google Cloud Console](https://console.cloud.google.com/), create or select a project, then open **Google Auth Platform**:
+
+1. In **Branding**, enter the app name **Status Pulse**, your support email and developer contact details. Complete the required app information.
+2. In **Audience**, choose **External** for a site intended for personal Google accounts and users outside your organization. While setting up the app, add your Google account and any intended testers under **Test users**. Follow the publishing requirements shown by Google before opening the app to everyone. Google's [consent setup guide](https://developers.google.com/workspace/guides/configure-oauth-consent) explains these settings.
+3. In **Clients**, choose **Create client**, then **Web application**. Add this exact **Authorized redirect URI**:
 
 ```text
 https://status-pulse-appp.onrender.com/api/auth/oauth/google/callback
 ```
 
-Add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to the Render web service's environment, then redeploy. The Google button appears automatically when both settings exist. The app asks for basic identity scopes: `openid email profile`; it does not request access to users' Gmail inboxes. For testing, add the accounts allowed by your Google project's audience settings. Follow Google's production publishing requirements before opening sign-in to everyone. See Google's [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
+4. Save the client and copy its client ID and secret directly into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the Render web service's **Environment** settings. Keep `PUBLIC_BASE_URL=https://status-pulse-appp.onrender.com`.
+5. Save and redeploy the service. Refresh the sign-in page after the deployment completes. The Google button appears when both settings are configured; try it with an account you added for testing.
+
+The app asks for basic identity scopes: `openid email profile`. It does not request access to Gmail inboxes. The redirect URI must match exactly, including HTTPS, hostname and callback path. See Google's [web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
 
 For local development, use a separate client or register `http://localhost:3000/api/auth/oauth/google/callback`, and keep local `PUBLIC_BASE_URL=http://localhost:3000`.
 
@@ -74,12 +107,16 @@ Visitors can choose light, dark or system appearance. Their choice is saved in t
 | --- | --- |
 | Email unavailable | `EMAIL_MODE`, `EMAIL_FROM` and `RESEND_API_KEY` on the running service |
 | Failed email, provider HTTP 401/403 | The API key, its sending permissions and the verified domain |
+| Resend testing sender rejects a teammate | `onboarding@resend.dev` only sends to your Resend account's email; verify your own domain for other recipients |
 | Retrying email, provider HTTP 429 | Provider sending limits; the queue retries with a delay |
 | Sent email but no inbox message | Recipient spelling, spam folder and Resend's delivery logs |
 | Invitation requests verification | Verify your own account first, then send the invitation again |
 | Old link is invalid | Request a new link; links expire, can be used once and may be superseded |
 | Google redirect mismatch | Callback URL must exactly match Google Console and `PUBLIC_BASE_URL` |
 | Social button missing | Both the client ID and secret must exist for that provider |
+| Settings work locally but not on Render | Add them to Render's Environment settings, redeploy and refresh; local `.env` is not uploaded |
+| Reset never arrives for a local account on Render | Use the environment where the account exists; the local database and hosted database are separate |
+| Different theme on localhost and Render | Set the preference on both addresses; browser storage is separate for each origin |
 | Provider says the account exists | Sign in manually, click your name in the sidebar and connect that provider |
 
-Payments remain an explicitly labelled demonstration. Email configuration does not turn on real billing. Local `EMAIL_MODE=simulation` exists only for the original assignment demonstrations and isolated tests; production rejects it.
+Payments remain an explicitly labelled demonstration. Email configuration does not turn on real billing. Local `EMAIL_MODE=simulation` with `ENABLE_SIMULATIONS=true` exists only for the original assignment demonstrations and isolated tests; it never sends to an inbox, and production rejects it. Leaving email settings absent keeps email disabled in every environment.

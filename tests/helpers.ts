@@ -13,7 +13,7 @@ export async function createTestContext() {
     await client.connect();
     const db = client.db('status_pulse_test');
     await migrate(db);
-    const config = loadConfig({ NODE_ENV: 'test', MONGODB_URI: replica.getUri(), MONGODB_DATABASE: 'status_pulse_test' });
+    const config = loadConfig({ NODE_ENV: 'test', EMAIL_MODE: 'simulation', MONGODB_URI: replica.getUri(), MONGODB_DATABASE: 'status_pulse_test' });
     const ctx: AppContext = { client, db, config, now: () => new Date() };
     return { ctx, close: async () => { await client.close(); await replica.stop(); } };
   } catch (error) { await client.close(); await replica.stop(); throw error; }

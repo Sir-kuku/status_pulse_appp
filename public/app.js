@@ -31,10 +31,20 @@ const eyeButton = id => `<button type="button" class="password-toggle" data-pass
 const providerIcon = id => id === 'google' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.24c1.9-1.75 2.98-4.33 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.24-2.51c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.76-5.59-4.12H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.92a6 6 0 0 1 0-3.84V7.49H3.07a10 10 0 0 0 0 9.02l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.5 3.83 1.51l2.87-2.87A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.93 5.49l3.34 2.59C7.2 7.72 9.4 5.96 12 5.96Z"/></svg>' : '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.82.09-.64.35-1.08.64-1.33-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.82a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>';
 function authMessage(message) { $('#auth-message').textContent = message; $('#auth-message').hidden = !message; }
 function renderAuthOptions() {
+  if (!state.authOptions) {
+    $('#auth-providers').innerHTML = '<p class="notice warning" role="status">We couldn’t load the available sign-in methods. You can retry or use your email and password.</p><button type="button" class="button" data-action="reload-sign-in">Retry sign-in options</button>';
+    $('#auth-providers').hidden = false; $('#auth-divider').hidden = true;
+    return;
+  }
   const providers = state.authOptions?.providers || [];
   $('#auth-providers').innerHTML = providers.map(provider => `<a class="button provider-button" href="${E(provider.startUrl)}">${providerIcon(provider.id)}Continue with ${E(provider.name)}</a>`).join('');
   $('#auth-providers').hidden = !providers.length; $('#auth-divider').hidden = !providers.length;
 }
+addEventListener('status-pulse:options', event => {
+  if (event.detail.status === 'loading') return;
+  state.authOptions = event.detail.options;
+  renderAuthOptions();
+});
 let toastTimer;
 function toast(message, error = false) { const el = $('#toast'); if ($('#modal').open) $('#modal').append(el); else document.body.append(el); el.textContent = message; el.classList.toggle('error', error); el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, error ? 9000 : 6500); }
 function project() { return state.projects.find(item => item._id === state.projectId); }
@@ -185,9 +195,23 @@ function modal(title, html) { $('#modal-title').textContent = title; $('#modal-b
 function formError(form, message) { let error = $('.form-error', form); if (!error) { error = document.createElement('p'); error.className = 'form-error'; error.setAttribute('role', 'alert'); form.append(error); } error.textContent = message; error.hidden = false; }
 function wireForm(id, action) { const element = $(`#${id}`); element.addEventListener('submit', async event => { event.preventDefault(); const submit = $('[type="submit"]', element); submit.disabled = true; const error = $('.form-error', element); if (error) error.hidden = true; try { await action(new FormData(element)); } catch (failure) { formError(element, failure.message); } finally { submit.disabled = false; } }); }
 const formEnd = text => `<p class="form-error" role="alert" hidden></p><div class="form-actions"><button class="button" type="button" data-action="close">Cancel</button><button class="button primary" type="submit">${text}</button></div>`;
-function forgotPasswordDialog() {
-  modal('Reset your password', `<p class="muted">Enter your account email and we’ll send a secure link to choose a new password.</p>${emailAvailable() ? '' : '<p class="notice warning">Email delivery is not available yet. The website owner needs to enable it before password recovery can send a message.</p>'}<form id="forgot-form"><label>Email address<input name="email" type="email" autocomplete="email" maxlength="254" value="${E($('#auth-form [name="email"]').value)}" required></label>${formEnd('Send reset link')}</form>`);
-  wireForm('forgot-form', async form => { const result = await api('/api/auth/forgot-password', 'POST', { email: form.get('email') }); modal('Check your inbox', `<div class="account-success">${icon('check')}</div><p class="muted">${E(result.message || 'If an account exists for that address, a password reset link will be sent. Check your inbox and spam folder.')}</p>${simulatedMail() ? '<p class="notice">This is a development email simulation. No message reaches a real inbox.</p>' : ''}<button type="button" class="button primary" data-action="close">Back to sign in</button>`); });
+async function forgotPasswordDialog() {
+  if (!state.authOptions) {
+    modal('Checking password recovery', '<p class="muted" role="status">Checking whether password reset emails are available…</p>');
+    state.authOptions = await window.StatusPulsePreferences?.reloadOptions() || null;
+    if (!$('#modal').open || $('#modal-title').textContent !== 'Checking password recovery') return;
+    if (!state.authOptions) {
+      modal('Reset your password', '<p class="notice warning">We couldn’t check password recovery right now. Please check your connection and try again.</p><div class="form-actions"><button type="button" class="button" data-action="close">Back to sign in</button><button type="button" class="button primary" data-action="retry-password-recovery">Try again</button></div>');
+      return;
+    }
+  }
+  if (!emailAvailable()) {
+    modal('Reset your password', `<p class="notice warning">Password reset emails are currently unavailable. Email delivery needs to be enabled before we can send you a reset link.</p>${state.authOptions.providers?.length ? '<p class="muted">If you previously connected a sign-in provider, you can use it to access your account.</p>' : ''}<button type="button" class="button primary" data-action="close">Back to sign in</button>`);
+    return;
+  }
+  const simulation = simulatedMail();
+  modal('Reset your password', `${simulation ? '<p class="notice warning">Demo mode: no email will be sent to your inbox. This only previews a password reset request.</p>' : '<p class="muted">Enter the email you used to register on this website. We’ll send a secure link to choose a new password.</p>'}<form id="forgot-form"><label>Email address<input name="email" type="email" autocomplete="email" maxlength="254" value="${E($('#auth-form [name="email"]').value)}" required></label>${formEnd(simulation ? 'Simulate reset request' : 'Send reset link')}</form>`);
+  wireForm('forgot-form', async form => { const result = await api('/api/auth/forgot-password', 'POST', { email: form.get('email') }); modal(simulation ? 'Simulation complete' : 'Check your inbox', `<div class="account-success">${icon('check')}</div><p class="muted">${simulation ? 'If an account uses this email, a simulated reset message was created. No message was sent to a real inbox.' : E(result.message || 'If an account exists for that address, a password reset link will be sent. Check your inbox and spam folder.')}</p>${simulation ? '' : '<p class="field-hint">Allow a few minutes and check your spam folder. Make sure you used the email registered on this website.</p>'}<button type="button" class="button primary" data-action="close">Back to sign in</button>`); });
 }
 function resetPasswordDialog(token) {
   modal('Choose a new password', `<p class="muted">Use a long, memorable passphrase that you don’t use anywhere else.</p><form id="reset-form"><label>New password<span class="password-field"><input id="reset-password" name="password" type="password" autocomplete="new-password" minlength="15" maxlength="128" required aria-describedby="reset-hint">${eyeButton('reset-password')}</span></label><p class="field-hint" id="reset-hint">At least 15 characters. After saving, sign in again on your devices.</p>${formEnd('Save new password')}</form>`);
@@ -305,6 +329,8 @@ document.addEventListener('click', async event => {
   const action = button.dataset.action, id = button.dataset.id; button.disabled = true;
   try {
     if (action === 'close') $('#modal').close();
+    if (action === 'reload-sign-in') { state.authOptions = await window.StatusPulsePreferences?.reloadOptions() || null; renderAuthOptions(); }
+    if (action === 'retry-password-recovery') await forgotPasswordDialog();
     if (action === 'account') accountDialog();
     if (action === 'email-activity') await emailActivity();
     if (action === 'resend-verification') { const result = await api('/api/auth/verification/resend', 'POST', {}); toast(result.message || (simulatedMail() ? 'Verification queued in the development email inbox.' : 'Verification email queued. Check your inbox and spam folder.')); }

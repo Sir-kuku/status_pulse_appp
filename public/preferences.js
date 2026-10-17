@@ -39,10 +39,54 @@
       reveal.title = visible ? 'Hide password' : 'Show password';
     }
   });
-  const options = fetch('/api/auth/options', { cache: 'no-store', signal: AbortSignal.timeout(15000) })
-    .then(response => { if (!response.ok) throw new Error('Account options unavailable'); return response.json(); })
-    .catch(() => null);
-  window.StatusPulsePreferences = { options };
+  let optionsStatus = 'loading', currentOptions = null, optionsPromise, inFlight;
+  async function fetchOptions() {
+    const delays = [0, 500, 1500];
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      try {
+        const response = await fetch('/api/auth/options', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+        if (!response.ok) {
+          // A transient service failure can recover; repeating a permanent client error cannot help.
+          if (![408, 429].includes(response.status) && response.status < 500) return null;
+          continue;
+        }
+        const config = await response.json();
+        if (!config || !Array.isArray(config.providers) || typeof config.email?.enabled !== 'boolean' || !['resend', 'simulation', 'disabled'].includes(config.email?.mode)) continue;
+        return config;
+      } catch { /* Network failures and timeouts use the same bounded retry budget. */ }
+    }
+    return null;
+  }
+  function notifyOptions() { dispatchEvent(new CustomEvent('status-pulse:options', { detail: { status: optionsStatus, options: currentOptions } })); }
+  function renderCredits(config) {
+    const name = config?.branding?.creatorName || 'Sir. Kuku';
+    let href;
+    try { const url = new URL(config?.branding?.creatorUrl || 'https://github.com/Sir-kuku'); if (['https:', 'http:'].includes(url.protocol)) href = url.href; } catch { /* A plain-text credit is always safe. */ }
+    document.querySelectorAll('[data-creator-credit]').forEach(credit => {
+      credit.replaceChildren(document.createTextNode('Designed & built by '));
+      const author = document.createElement(href ? 'a' : 'span');
+      author.textContent = name;
+      if (href) { author.href = href; author.target = '_blank'; author.rel = 'noopener noreferrer'; }
+      credit.append(author);
+    });
+  }
+  function reloadOptions() {
+    if (inFlight) return inFlight;
+    optionsStatus = 'loading';
+    inFlight = fetchOptions().then(config => {
+      currentOptions = config;
+      optionsStatus = config ? 'ready' : 'unavailable';
+      renderCredits(config);
+      notifyOptions();
+      return config;
+    }).finally(() => { inFlight = undefined; });
+    optionsPromise = inFlight;
+    notifyOptions();
+    return optionsPromise;
+  }
+  window.StatusPulsePreferences = { get options() { return optionsPromise; }, get status() { return optionsStatus; }, reloadOptions };
+  void reloadOptions();
   document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-theme-control]').forEach(control => {
       control.setAttribute('role', 'group');
@@ -50,17 +94,6 @@
       control.innerHTML = choices.map(choice => `<button type="button" data-theme-choice="${choice}" aria-label="${choice[0].toUpperCase() + choice.slice(1)} theme" title="${choice[0].toUpperCase() + choice.slice(1)} theme" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shapes[choice]}</svg></button>`).join('');
     });
     apply();
-    void options.then(config => {
-      const name = config?.branding?.creatorName || 'Sir. Kuku';
-      let href;
-      try { const url = new URL(config?.branding?.creatorUrl || 'https://github.com/Sir-kuku'); if (['https:', 'http:'].includes(url.protocol)) href = url.href; } catch { /* A plain-text credit is always safe. */ }
-      document.querySelectorAll('[data-creator-credit]').forEach(credit => {
-        credit.replaceChildren(document.createTextNode('Designed & built by '));
-        const author = document.createElement(href ? 'a' : 'span');
-        author.textContent = name;
-        if (href) { author.href = href; author.target = '_blank'; author.rel = 'noopener noreferrer'; }
-        credit.append(author);
-      });
-    });
+    renderCredits(currentOptions);
   });
 })();

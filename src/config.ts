@@ -27,7 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const publicUrl = new URL(settings.PUBLIC_BASE_URL);
   if (!['http:', 'https:'].includes(publicUrl.protocol)) throw new Error('PUBLIC_BASE_URL must use HTTP or HTTPS.');
   if (publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash || publicUrl.pathname !== '/') throw new Error('PUBLIC_BASE_URL must be an origin without a path, query, or credentials.');
-  const emailMode = settings.EMAIL_MODE ?? (settings.RESEND_API_KEY && settings.EMAIL_FROM ? 'resend' : settings.NODE_ENV === 'production' ? 'disabled' : settings.ENABLE_SIMULATIONS === 'true' ? 'simulation' : 'disabled');
+  const emailMode = settings.EMAIL_MODE ?? (settings.RESEND_API_KEY && settings.EMAIL_FROM ? 'resend' : 'disabled');
   if (emailMode === 'simulation' && settings.NODE_ENV === 'production') throw new Error('Simulated email is not allowed in production. Configure Resend or disable email.');
   if (emailMode === 'resend' && (!settings.RESEND_API_KEY || !settings.EMAIL_FROM)) throw new Error('Resend email requires RESEND_API_KEY and EMAIL_FROM.');
   if (emailMode === 'resend') {

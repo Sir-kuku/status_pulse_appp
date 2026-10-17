@@ -19,6 +19,13 @@ test('callback origin and creator URL validation reject unsafe schemes and ambig
   }
   assert.throws(() => loadConfig({ CREATOR_URL: 'javascript:alert(1)' }));
   assert.throws(() => loadConfig({ NODE_ENV: 'production', PUBLIC_BASE_URL: 'http://example.com' }), /HTTPS/);
-  assert.equal(loadConfig({ NODE_ENV: 'test' }).emailMode, 'simulation');
+  assert.equal(loadConfig({ NODE_ENV: 'test' }).emailMode, 'disabled');
   assert.equal(loadConfig({ NODE_ENV: 'test', ENABLE_SIMULATIONS: 'false' }).emailMode, 'disabled');
+});
+
+test('local email requires a real sender or an explicit demonstration setting', () => {
+  assert.equal(loadConfig({}).emailMode, 'disabled');
+  assert.equal(loadConfig({ ENABLE_SIMULATIONS: 'true' }).emailMode, 'disabled');
+  assert.equal(loadConfig({ EMAIL_MODE: 'simulation' }).emailMode, 'simulation');
+  assert.equal(loadConfig({ EMAIL_FROM: 'Status Pulse <updates@example.com>', RESEND_API_KEY: 'test-key' }).emailMode, 'resend');
 });

@@ -116,8 +116,8 @@ Verified locally on **17 October 2026**:
 
 | Check | Result |
 | --- | --- |
-| Complete backend regression suite | 72 passed, including 22 authentication/email cases covering signed Google token validation, explicit provider linking, session revocation, real-mode email retries, migration from simulation and unsubscribe |
-| Browser workflows | 10 passed across the account and existing-workflow suites; includes mobile theme persistence, password visibility, invitation links, recovery, public verification and project-role controls |
+| Complete backend regression suite | 73 passed, including authentication/email cases covering signed Google token validation, explicit provider linking, session revocation, real-mode email retries, migration from simulation, unsubscribe and consistent email defaults |
+| Browser workflows | 13 passed across account, preferences and existing-workflow suites; includes mobile theme persistence, password visibility, invitation links, recovery availability, transient connection failures, public verification and project-role controls |
 | Deterministic acceptance demonstration | All 10 scenarios passed |
 | Build, frontend syntax and API contract | Passed; 51 documented API paths |
 | Documentation review | Seven Markdown files checked; local links resolve and the original 48 acceptance criteria remain mapped |
@@ -126,6 +126,8 @@ Verified locally on **17 October 2026**:
 | Live provider delivery and OAuth consent | Awaiting the owner's provider accounts and credentials; tests use controlled provider responses |
 
 The [connection guide](email-and-sign-in-setup.md) gives the exact callback URLs and Render settings for the current website. It also explains how to verify a real received invitation, a password reset, Google/GitHub sign-in and an unsubscribe. Source-code completion does not substitute for those live provider checks.
+
+The recovery follow-up makes unconfigured email consistent locally and on Render. Simulation now requires an explicit development setting, and the reset dialog explains it before accepting a request. When email is disabled, the dialog does not offer a send action. Temporary failures while loading sign-in options are retried and shown separately from missing provider configuration.
 
 ## Submission and handover
 

@@ -86,14 +86,16 @@ test('an emailed invitation survives sign-in and joins the intended project', as
   await page.screenshot({ path: '.local/verification/account-dark-desktop.png', fullPage: true, animations: 'disabled' });
 });
 
-test('password recovery gives a neutral acknowledgement and expired links remain safely editable', async ({ page, request }) => {
+test('simulated password recovery is labelled before submission and expired links remain safely editable', async ({ page, request }) => {
   const user = await account(request, 'Password Recovery');
   await page.goto('/');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.getByLabel('Email address', { exact: true }).fill(user.email);
   await page.getByRole('button', { name: 'Forgot password?' }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Send reset link' }).click();
-  await expect(page.getByRole('heading', { name: 'Check your inbox' })).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('Demo mode: no email will be sent');
+  await expect(page.getByRole('button', { name: 'Send reset link', exact: true })).toHaveCount(0);
+  await page.getByRole('dialog').getByRole('button', { name: 'Simulate reset request' }).click();
+  await expect(page.getByRole('heading', { name: 'Simulation complete' })).toBeVisible();
   await expect(page.getByRole('dialog')).toContainText('If an account uses this email');
   await page.goto(`/#reset_password=${'A'.repeat(43)}`);
   await expect(page.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
@@ -103,6 +105,35 @@ test('password recovery gives a neutral acknowledgement and expired links remain
   await page.getByRole('button', { name: 'Save new password' }).click();
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText('invalid or expired');
   expect(new URL(page.url()).hash).toBe('');
+});
+
+test('password recovery offers submission only when email is configured', async ({ page }) => {
+  let mode = 'disabled', submittedEmail = '';
+  await page.route('**/api/auth/options', route => route.fulfill({ json: {
+    providers: [], email: { enabled: mode === 'resend', mode }, branding: { creatorName: 'Sir. Kuku' }, simulations: false,
+  } }));
+  await page.route('**/api/auth/forgot-password', route => {
+    submittedEmail = route.request().postDataJSON().email;
+    return route.fulfill({ status: 202, json: { message: 'If an account uses this email, you will receive instructions to reset its password.' } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Forgot password?' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Password reset emails are currently unavailable');
+  await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send reset link', exact: true })).toHaveCount(0);
+  expect(submittedEmail).toBe('');
+
+  mode = 'resend';
+  await page.reload();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByLabel('Email address', { exact: true }).fill('recovery@example.test');
+  await page.getByRole('button', { name: 'Forgot password?' }).click();
+  await page.getByRole('button', { name: 'Send reset link', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Check your inbox' })).toBeVisible();
+  expect(submittedEmail).toBe('recovery@example.test');
+  await expect(page.getByRole('dialog')).toContainText('If an account uses this email');
+  await expect(page.getByRole('dialog')).not.toContainText('simulation');
 });
 
 test('public verification links work in an already open status page and retain the dark theme', async ({ page, request }) => {

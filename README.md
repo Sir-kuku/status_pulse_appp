@@ -4,7 +4,7 @@ Status Pulse helps a team answer three practical questions: are our services wor
 
 This repository brings the six-week project together: the monitoring backend, a responsive browser dashboard, regression tests, API documentation, deployment configuration, and a presentation guide. The dashboard uses the same authenticated API as other clients; monitoring continues in an independent worker process.
 
-**Real email and social sign-in are supported.** Connect Resend for verification, password recovery, invitations and incident notifications; connect Google or GitHub for sign-up and sign-in. The [connection guide](docs/email-and-sign-in-setup.md) lists the exact Render settings. Production email stays unavailable until configured, and never claims to send simulated messages. Payments remain a labelled demonstration with no charges.
+**Real email and social sign-in are supported.** Connect Resend for verification, password recovery, invitations and incident notifications; connect Google or GitHub for sign-up and sign-in. The [connection guide](docs/email-and-sign-in-setup.md) lists the exact Render settings, including a first email test to your own inbox before connecting a domain. Email stays unavailable both locally and on Render until configured. Payments remain a labelled demonstration with no charges.
 
 ## Start the project
 
@@ -17,6 +17,8 @@ npm run local
 ```
 
 Open **http://localhost:3000/** for the dashboard. The helper starts a persistent, isolated MongoDB replica set, the API, and an independent worker. Stop it with Ctrl+C; your local data is preserved. It does not use or modify an existing Windows MongoDB service or an Atlas database.
+
+Localhost and Render run separately. Your local `.env` settings are not uploaded to Render, and accounts in the isolated local database are not accounts in the hosted database. Theme choices are saved for each website address in your browser. To receive password resets or see Google sign-in on either site, configure the providers for that environment using the [connection guide](docs/email-and-sign-in-setup.md).
 
 On macOS/Linux, create configuration with `test -f .env || cp .env.example .env`. The first MongoDB start may need internet access to download a binary. On Windows, the helper can reuse an installed MongoDB executable. Set `MONGOMS_SYSTEM_BINARY` to choose a compatible executable explicitly.
 
@@ -113,8 +115,8 @@ Copy the example once and keep secrets in `.env` or the host's secret settings. 
 | `WORKER_CONCURRENCY` | `4`; allowed range 1–16 |
 | `WORKER_POLL_MS` | `1000`; allowed range 250–60000 |
 | `SESSION_TTL_HOURS` | `24`; allowed range 1–168 |
-| `ENABLE_SIMULATIONS` | `true`; controls assignment payment demonstrations and local email demonstrations |
-| `EMAIL_MODE` | Production: `resend` when key/from exist, otherwise `disabled`. Development/test: `simulation` when demonstrations are enabled |
+| `ENABLE_SIMULATIONS` | `true`; enables assignment payment demonstrations; explicit local email simulation also requires this setting |
+| `EMAIL_MODE` | All environments: `resend` when key/from exist, otherwise `disabled`. Use `simulation` explicitly for local demonstrations or tests; production rejects it |
 | `EMAIL_FROM`, `RESEND_API_KEY` | Verified sender and private key; required for real email |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional pair enabling Google sign-in |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Optional pair enabling GitHub sign-in |
