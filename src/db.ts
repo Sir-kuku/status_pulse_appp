@@ -5,6 +5,12 @@ import { DatabaseStartupError } from './startup-error.js';
 // Every index is named: migrations are safe to re-run and uniqueness is enforced by MongoDB.
 const indexes: Record<string, IndexDescription[]> = {
   users: [{ key: { email: 1 }, unique: true, name: 'user_email_unique' }],
+  oauthFlows: [{ key: { stateHash: 1 }, unique: true, name: 'oauth_state_unique' }, { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'oauth_flow_expiry' }],
+  oauthExchanges: [{ key: { codeHash: 1 }, unique: true, name: 'oauth_exchange_unique' }, { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'oauth_exchange_expiry' }],
+  oauthIdentities: [{ key: { provider: 1, subject: 1 }, unique: true, name: 'oauth_identity_unique' }, { key: { userId: 1, provider: 1 }, unique: true, name: 'oauth_user_provider_unique' }],
+  accountTokens: [{ key: { tokenHash: 1 }, unique: true, name: 'account_token_unique' }, { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'account_token_expiry' }, { key: { userId: 1, kind: 1 }, name: 'account_token_user_kind' }],
+  emailOutbox: [{ key: { dedupeKey: 1 }, unique: true, name: 'email_dedupe_unique' }, { key: { deliveryState: 1, nextAttemptAt: 1, leaseUntil: 1 }, name: 'email_pending' }, { key: { projectId: 1, createdAt: -1 }, name: 'email_project_history' }],
+  emailAttempts: [{ key: { emailId: 1, createdAt: -1 }, name: 'email_attempt_history' }],
   sessions: [{ key: { tokenHash: 1 }, unique: true, name: 'session_token_unique' }, { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'session_expiry' }],
   projects: [{ key: { slug: 1 }, unique: true, name: 'project_slug_unique' }],
   memberships: [{ key: { projectId: 1, userId: 1 }, unique: true, name: 'membership_unique' }, { key: { userId: 1 }, name: 'membership_user' }],
@@ -19,7 +25,7 @@ const indexes: Record<string, IndexDescription[]> = {
   alerts: [{ key: { dedupeKey: 1 }, unique: true, name: 'alert_dedupe' }, { key: { projectId: 1, createdAt: -1 }, name: 'project_alerts' }],
   alertAttempts: [{ key: { alertId: 1, attempt: 1 }, unique: true, name: 'alert_attempt_unique' }],
   subscriptions: [{ key: { projectId: 1, email: 1 }, unique: true, name: 'subscription_unique' }, { key: { verificationTokenHash: 1 }, unique: true, sparse: true, name: 'subscription_token_unique' }],
-  notifications: [{ key: { subscriptionId: 1, eventKey: 1 }, unique: true, name: 'subscriber_notification_unique' }],
+  notifications: [{ key: { subscriptionId: 1, eventKey: 1 }, unique: true, name: 'subscriber_notification_unique' }, { key: { unsubscribeTokenHash: 1 }, unique: true, sparse: true, name: 'notification_unsubscribe_unique' }],
   simulatedMail: [{ key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'simulated_mail_expiry' }, { key: { projectId: 1, createdAt: -1 }, name: 'project_simulated_mail' }],
   payments: [{ key: { projectId: 1, idempotencyKey: 1 }, unique: true, name: 'payment_idempotency' }],
   auditEvents: [{ key: { projectId: 1, createdAt: -1 }, name: 'project_audit' }],

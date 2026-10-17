@@ -4,7 +4,7 @@ Status Pulse helps a team answer three practical questions: are our services wor
 
 This repository brings the six-week project together: the monitoring backend, a responsive browser dashboard, regression tests, API documentation, deployment configuration, and a presentation guide. The dashboard uses the same authenticated API as other clients; monitoring continues in an independent worker process.
 
-**Email, subscription verification, invitations, and payments are simulations.** No email is sent, mailbox ownership is not proven, and no money is charged. Local verification and hosted deployment are recorded separately in the [final delivery report](docs/final-delivery.md).
+**Real email and social sign-in are supported.** Connect Resend for verification, password recovery, invitations and incident notifications; connect Google or GitHub for sign-up and sign-in. The [connection guide](docs/email-and-sign-in-setup.md) lists the exact Render settings. Production email stays unavailable until configured, and never claims to send simulated messages. Payments remain a labelled demonstration with no charges.
 
 ## Start the project
 
@@ -35,7 +35,7 @@ Readiness does not prove the worker is making progress. Create a monitor and ins
 
 ## Try it in the browser
 
-1. Create an account using a unique email and a password of 15–128 characters.
+1. Create an account manually with a password of 15–128 characters, or use a configured Google/GitHub provider. Verify your email before sending team invitations.
 2. Create a project, then add a public HTTP or HTTPS endpoint as a monitor. Choose whether it should appear on the public status page.
 3. Wait for the worker, or queue a check from the monitor details. The initial state is **unknown** until enough evidence exists.
 4. Inspect response times, recent checks, and status history. Defaults require two healthy checks for operational status, three consecutive failures for an outage, and two consecutive successes for recovery.
@@ -43,6 +43,8 @@ Readiness does not prove the worker is making progress. Create a monitor and ins
 6. Open the public page in a separate browser context. Only explicitly public services and incident information should appear.
 
 Project owners configure monitors, manage members, change visibility, and simulate plan upgrades. Responders investigate incidents, queue checks, set temporary overrides, and acknowledge alerts. Viewers can inspect their project's information. Platform administration is provisioned separately.
+
+Light, dark and system themes work across the site and remember your preference. Password visibility controls and account settings make sign-in and verification easier.
 
 The interface uses live API data. An empty history means no checks have been recorded; a queued check needs a running worker. Public example endpoints are useful for interaction, but their current response time is not a repeatable test fixture. Use the [demo guide](docs/final-delivery.md#demonstration-walkthrough) for a presentation with repeatable evidence.
 
@@ -111,7 +113,12 @@ Copy the example once and keep secrets in `.env` or the host's secret settings. 
 | `WORKER_CONCURRENCY` | `4`; allowed range 1–16 |
 | `WORKER_POLL_MS` | `1000`; allowed range 250–60000 |
 | `SESSION_TTL_HOURS` | `24`; allowed range 1–168 |
-| `ENABLE_SIMULATIONS` | `true`; disabling this does not configure real providers |
+| `ENABLE_SIMULATIONS` | `true`; controls assignment payment demonstrations and local email demonstrations |
+| `EMAIL_MODE` | Production: `resend` when key/from exist, otherwise `disabled`. Development/test: `simulation` when demonstrations are enabled |
+| `EMAIL_FROM`, `RESEND_API_KEY` | Verified sender and private key; required for real email |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional pair enabling Google sign-in |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Optional pair enabling GitHub sign-in |
+| `CREATOR_NAME`, `CREATOR_URL` | Footer credit; defaults to Sir. Kuku and his GitHub profile |
 
 ## How the project is organised
 
@@ -133,4 +140,4 @@ Monitoring accepts GET/HEAD to public HTTP/HTTPS destinations. Private and reser
 
 Durable jobs, leases, unique indexes, and transactions provide one authoritative stored result per job. A crash after an HTTP request can cause that request to be sent again. Historical resources are archived rather than erased. Local single-node MongoDB supports transactions but is not highly available.
 
-Docker and Render configuration are included. Those files do not prove a live deployment; hosted API, database, and worker verification must be recorded against the deployed revision. Real email, payment processing, multi-region monitoring, and automatic remediation remain outside this coursework scope.
+Docker and Render configuration are included. Those files do not prove a live deployment; hosted API, database, and worker verification must be recorded against the deployed revision. Live email and OAuth need your provider accounts and secrets. Payment processing, multi-region monitoring, and automatic remediation are not implemented.

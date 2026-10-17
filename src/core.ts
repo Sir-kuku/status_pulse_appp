@@ -6,11 +6,14 @@ import { z } from 'zod';
 export interface Config {
   env: string; port: number; mongoUri: string; database: string; publicBaseUrl: string;
   workerConcurrency: number; workerPollMs: number; sessionTtlHours: number; simulations: boolean;
+  emailMode: 'resend' | 'simulation' | 'disabled'; emailFrom?: string; resendApiKey?: string;
+  googleClientId?: string; googleClientSecret?: string; githubClientId?: string; githubClientSecret?: string;
+  creatorName: string; creatorUrl?: string;
 }
-export interface AppContext { client: MongoClient; db: Db; config: Config; now: () => Date }
+export interface AppContext { client: MongoClient; db: Db; config: Config; now: () => Date; emailFetch?: typeof fetch }
 export type Role = 'owner' | 'responder' | 'viewer';
 export type ServiceStatus = 'operational' | 'degraded' | 'outage' | 'unknown';
-export interface Principal { _id: ObjectId; email: string; name: string; platformRole: 'user' | 'admin' }
+export interface Principal { _id: ObjectId; email: string; name: string; platformRole: 'user' | 'admin'; emailVerified: boolean; authProviders: string[] }
 export class HttpError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
@@ -27,7 +30,8 @@ export const nameSchema = z.string().trim().min(1).max(100);
 export const idSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Expected a resource ID');
 export function actor(res: Response): Principal { return res.locals.user as Principal; }
 export function publicUser(user: Document): Principal {
-  return { _id: user._id, email: user.email, name: user.name, platformRole: user.platformRole };
+  return { _id: user._id, email: user.email, name: user.name, platformRole: user.platformRole,
+    emailVerified: Boolean(user.emailVerifiedAt) && user.emailVerificationMethod !== 'simulation', authProviders: user.authProviders ?? (user.passwordHash ? ['password'] : []) };
 }
 export async function transaction<T>(ctx: AppContext, work: (session: ClientSession) => Promise<T>): Promise<T> {
   return ctx.client.withSession(async session => {
@@ -50,7 +54,7 @@ export function requireUser(ctx: AppContext): RequestHandler {
     const session = await ctx.db.collection('sessions').findOne({ tokenHash: hashToken(header.slice(7)), expiresAt: { $gt: ctx.now() } });
     if (!session) return next(new HttpError(401, 'UNAUTHENTICATED', 'Session is invalid or expired.'));
     const user = await ctx.db.collection('users').findOne({ _id: session.userId });
-    if (!user) return next(new HttpError(401, 'UNAUTHENTICATED', 'Session is invalid or expired.'));
+    if (!user || (session.authVersion ?? 0) !== (user.authVersion ?? 0)) return next(new HttpError(401, 'UNAUTHENTICATED', 'Session is invalid or expired.'));
     res.locals.user = publicUser(user);
     next();
   };

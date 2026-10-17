@@ -1,5 +1,9 @@
 # Review before applying: the background worker uses a PAID Render compute plan.
 # Database credentials are entered in Render, never committed here.
+# Real email: add EMAIL_MODE=resend, EMAIL_FROM and RESEND_API_KEY to BOTH services.
+# Until configured, production email is disabled (never simulated).
+# Add GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET and GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET
+# to the web service to enable social sign-in. See docs/email-and-sign-in-setup.md.
 services:
   - type: web
     name: status-pulse-api

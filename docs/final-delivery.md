@@ -1,6 +1,8 @@
 # Final delivery: weeks 1–6
 
-Status Pulse now connects the monitoring engine to a usable team dashboard and public status page. This report explains the final work, how to demonstrate it, and what the verification evidence does and does not establish.
+For the latest account, email and appearance improvements, read [the product extension](#account-email-and-appearance-extension) below and the [provider connection guide](email-and-sign-in-setup.md).
+
+Status Pulse now connects the monitoring engine to a usable team dashboard and public status page. This report records the original six-week delivery, how to demonstrate it, and its verification limits. A subsequent product extension adds real email, Google/GitHub identity, themes and password visibility; see [connection and activation](email-and-sign-in-setup.md). Original simulation descriptions below refer to the coursework demonstration mode.
 
 ## The six-week progression
 
@@ -31,6 +33,8 @@ The reliability review closed several concrete gaps:
 - Regressions verify slow/fast worker independence and a real MongoDB transaction rollback after a later write is rejected.
 
 ## Verification record
+
+This section records the original six-week release. The provider and appearance extension is recorded separately below.
 
 Verification date: **17 October 2026 (Africa/Lagos)**. These results came from the completed local runs, not estimates or previous CI results.
 
@@ -95,6 +99,33 @@ Avoid claiming that a controlled test outcome came from a live website. If a rea
 | 8 — Final delivery | Weeks 5–6 complete the interface, review, documentation, and demonstration | Verification table and honest deployment boundary |
 
 Useful answers during questions: MongoDB needs a replica set for transactions; a transaction cannot undo an HTTP request; the worker runs independently of page views; a public URL is checked again before network use; and simulation settings are not real provider integrations.
+
+## Account, email and appearance extension
+
+The invitation issue came from the original coursework simulation: it created an invitation record without contacting an email service. The product extension adds a Resend-backed queue for team invitations, account verification, password recovery, password-change notices, subscription confirmation and public incident updates. Production email stays unavailable until a real sender and key are configured. Development demonstrations remain explicitly labelled.
+
+Messages have durable delivery attempts, bounded retries and a stable provider idempotency key. A successful API response is recorded as **sent to provider**, rather than claiming inbox delivery. Queued messages are checked again before sending; expired or superseded links, revoked subscriptions and private services cannot produce stale notifications. Owners can inspect project email activity without seeing secret link tokens. Email processing runs independently of monitoring checks.
+
+Google and GitHub can create accounts and sign users in once their credentials are configured. Existing manual accounts connect a provider explicitly from **Your account**. Browser-bound OAuth state, PKCE and verified provider identity protect that flow. Resetting a password consumes a one-use link and invalidates existing sessions, including sessions created concurrently with the reset. Old simulated verification cannot become proof of real mailbox ownership.
+
+Light, dark and system appearance work throughout the dashboard, account screens, public pages and API documentation. The browser remembers the preference. Password eye buttons support keyboard use, and the footer credits **Designed & built by Sir. Kuku**, with an operator-configurable name and link. Email links work both on a fresh page and in an already open tab.
+
+### Extension verification
+
+Verified locally on **17 October 2026**:
+
+| Check | Result |
+| --- | --- |
+| Complete backend regression suite | 72 passed, including 22 authentication/email cases covering signed Google token validation, explicit provider linking, session revocation, real-mode email retries, migration from simulation and unsubscribe |
+| Browser workflows | 10 passed across the account and existing-workflow suites; includes mobile theme persistence, password visibility, invitation links, recovery, public verification and project-role controls |
+| Deterministic acceptance demonstration | All 10 scenarios passed |
+| Build, frontend syntax and API contract | Passed; 51 documented API paths |
+| Documentation review | Seven Markdown files checked; local links resolve and the original 48 acceptance criteria remain mapped |
+| Visual inspection | Light account screen, dark mobile account screen, dark account dialog and dark public status page inspected |
+| Local runtime | Updated persistent local stack restarted; database readiness returned ready |
+| Live provider delivery and OAuth consent | Awaiting the owner's provider accounts and credentials; tests use controlled provider responses |
+
+The [connection guide](email-and-sign-in-setup.md) gives the exact callback URLs and Render settings for the current website. It also explains how to verify a real received invitation, a password reset, Google/GitHub sign-in and an unsubscribe. Source-code completion does not substitute for those live provider checks.
 
 ## Submission and handover
 

@@ -31,7 +31,7 @@ async function navigate(page: Page, name: string) {
 }
 async function screenshot(page: Page, name: string) {
   await mkdir('.local/verification', { recursive: true });
-  await page.screenshot({ path: `.local/verification/${name}.png`, fullPage: true });
+  await page.screenshot({ path: `.local/verification/${name}.png`, fullPage: true, animations: 'disabled' });
 }
 
 test('owner completes registration, monitoring, response, payment retry and archive workflows', async ({ page, request }) => {
@@ -141,6 +141,8 @@ test('team roles can be managed and viewers cannot see write controls', async ({
   await page.getByRole('button', { name: 'Manage access' }).click();
   await page.getByRole('combobox', { name: 'Access', exact: true }).selectOption('remove');
   await page.getByRole('button', { name: 'Save access' }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: viewer.email })).toHaveCount(0);
   expect((await (await request.get(`${base}/members`, { headers })).json()).members).toHaveLength(1);
 });
 

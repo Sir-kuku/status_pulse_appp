@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ObjectId } from 'mongodb';
 import { z } from 'zod';
 import { actor, audit, emailSchema, fail, hashToken, nameSchema, oid, pagination, projectAccess, requireUser, sameId, token, transaction, type AppContext } from './core.js';
+import { emailContent, emailMode, queueEmail, requireEmailDelivery } from './email.js';
 
 const projectInput = z.object({ name: nameSchema, slug: z.string().min(3).max(60).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), publicEnabled: z.boolean().default(false) }).strict();
 const invitationInput = z.object({ email: emailSchema, role: z.enum(['responder', 'viewer']) }).strict();
@@ -60,23 +61,33 @@ export function projectRouter(ctx: AppContext): Router {
   router.post('/projects/:projectId/invitations', async (req, res) => {
     const project = await projectAccess(ctx, req, res, ['owner']);
     const input = invitationInput.parse(req.body);
-    if (!ctx.config.simulations) return fail(503, 'DELIVERY_UNAVAILABLE', 'Invitation email adapter is not configured.');
+    requireEmailDelivery(ctx);
+    const simulation = emailMode(ctx) === 'simulation';
+    if (!simulation && !actor(res).emailVerified) return fail(403, 'EMAIL_VERIFICATION_REQUIRED', 'Verify your email address before inviting teammates.');
+    const existingUser = await ctx.db.collection('users').findOne({ email: input.email });
+    if (existingUser && await ctx.db.collection('memberships').findOne({ projectId: project._id, userId: existingUser._id })) return fail(409, 'ALREADY_MEMBER', 'This person already belongs to your project.');
+    const recent = await ctx.db.collection('invitations').findOne({ projectId: project._id, email: input.email, createdAt: { $gt: new Date(ctx.now().getTime() - 60_000) }, expiresAt: { $gt: ctx.now() }, acceptedAt: { $exists: false } });
+    if (recent && !simulation) return fail(429, 'INVITATION_RECENTLY_SENT', 'An invitation was just sent to this address. Please wait a minute before sending another.');
     const rawToken = token();
-    const invitation = { _id: new ObjectId(), projectId: project._id, ...input, tokenHash: hashToken(rawToken), createdBy: actor(res)._id, createdAt: ctx.now(), expiresAt: new Date(ctx.now().getTime() + 86400000) };
+    const invitation = { _id: new ObjectId(), projectId: project._id, ...input, tokenHash: hashToken(rawToken), simulation, createdBy: actor(res)._id, createdAt: ctx.now(), expiresAt: new Date(ctx.now().getTime() + 86400000) };
     await transaction(ctx, async session => {
       // A newly issued invitation supersedes prior unaccepted invitations for this address/project.
       await ctx.db.collection('invitations').updateMany({ projectId: project._id, email: input.email, acceptedAt: { $exists: false } }, { $set: { expiresAt: ctx.now() } }, { session });
       await ctx.db.collection('invitations').insertOne(invitation, { session });
-      await ctx.db.collection('simulatedMail').insertOne({ projectId: project._id, recipient: input.email, kind: 'project-invitation', token: rawToken, createdAt: ctx.now(), expiresAt: invitation.expiresAt }, { session });
+      const link = `${ctx.config.publicBaseUrl}/#invite=${encodeURIComponent(rawToken)}`;
+      const content = emailContent(`You're invited to ${project.name}`, [`${actor(res).name} invited you to join ${project.name} on Status Pulse as a ${input.role}.`, 'Sign in or create an account using this email address, then accept your invitation. This link expires in 24 hours.'], { label: 'Accept invitation', url: link }, 'If you were not expecting this invitation, you can safely ignore this email.');
+      await queueEmail(ctx, session, { kind: 'project-invitation', to: input.email, subject: `Join ${project.name} on Status Pulse`, ...content, dedupeKey: `invitation:${invitation._id}`, projectId: project._id, invitationId: invitation._id, expiresAt: invitation.expiresAt });
+      if (simulation) await ctx.db.collection('simulatedMail').insertOne({ projectId: project._id, recipient: input.email, kind: 'project-invitation', token: rawToken, createdAt: ctx.now(), expiresAt: invitation.expiresAt, simulation: true }, { session });
       await audit(ctx, session, { action: 'membership.invited', actorId: actor(res)._id, projectId: project._id, resourceId: invitation._id, metadata: { role: input.role } });
     });
-    res.status(201).json({ invitation: { _id: invitation._id, email: input.email, role: input.role, expiresAt: invitation.expiresAt }, simulatedEmail: { token: rawToken, note: 'Simulation only; no email was sent.' } });
+    res.status(201).json({ invitation: { _id: invitation._id, email: input.email, role: input.role, expiresAt: invitation.expiresAt }, delivery: { state: 'queued', simulation }, ...(simulation ? { simulatedEmail: { token: rawToken, note: 'Simulation only; no email was sent.' } } : {}) });
   });
   router.post('/invitations/accept', async (req, res) => {
     const { token: rawToken } = z.object({ token: z.string().min(20).max(200) }).strict().parse(req.body);
     const membership = await transaction(ctx, async session => {
       const invitation = await ctx.db.collection('invitations').findOne({ tokenHash: hashToken(rawToken), email: actor(res).email, expiresAt: { $gt: ctx.now() }, acceptedAt: { $exists: false } }, { session });
       if (!invitation) return fail(400, 'INVALID_INVITATION', 'Invitation is invalid, expired, already used, or belongs to another account.');
+      if ((invitation.simulation ?? true) && emailMode(ctx) !== 'simulation') return fail(400, 'INVALID_INVITATION', 'This development invitation cannot be used here. Ask the project owner to send a new invitation.');
       const project = await ctx.db.collection('projects').findOne({ _id: invitation.projectId, archivedAt: { $exists: false } }, { session });
       if (!project) return fail(404, 'NOT_FOUND', 'Project not found.');
       const existing = await ctx.db.collection('memberships').findOne({ projectId: project._id, userId: actor(res)._id }, { session });

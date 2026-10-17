@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ObjectId, type ClientSession, type Document } from 'mongodb';
 import { z } from 'zod';
 import { type AppContext, effectiveStatus, emailSchema, fail, hashToken, idSchema, oid, token, transaction } from './core.js';
+import { emailContent, emailMode, queueEmail, requireEmailDelivery } from './email.js';
 
 const listSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).max(10000).default(0) }).strict();
 const signupSchema = z.object({ email: emailSchema, serviceIds: z.array(idSchema).min(1).max(50).refine(ids => new Set(ids.map(id => id.toLowerCase())).size === ids.length, 'Select each service only once.') }).strict();
@@ -61,26 +62,33 @@ export function publicRouter(ctx: AppContext): Router {
   });
   router.post('/projects/:slug/subscriptions', async (req, res) => {
     const body = signupSchema.parse(req.body);
-    if (!ctx.config.simulations) return fail(503, 'EMAIL_UNAVAILABLE', 'A verification email provider is not configured.');
+    requireEmailDelivery(ctx);
+    const simulation = emailMode(ctx) === 'simulation';
     const serviceIds = body.serviceIds.map(oid);
     const createSubscription = async (session: ClientSession) => {
       const project = await publicProject(ctx, req.params.slug, session);
       const visibleCount = await ctx.db.collection('services').countDocuments({ _id: { $in: serviceIds }, projectId: project._id, publicVisible: true, archivedAt: { $exists: false } }, { session });
       if (visibleCount !== serviceIds.length) return fail(400, 'INVALID_SERVICES', 'Choose only services listed on this public status page.');
       const existing = await ctx.db.collection('subscriptions').findOne({ projectId: project._id, email: body.email }, { session });
-      if (existing && (existing.verifiedAt || !existing.verificationExpiresAt || new Date(existing.verificationExpiresAt) > ctx.now())) return null;
+      if (existing && !existing.revokedAt && ((existing.verifiedAt && existing.verificationMethod === (simulation ? 'simulation' : 'email'))
+        || (!existing.verifiedAt && (existing.verificationSimulation ?? true) === simulation && existing.verificationExpiresAt && new Date(existing.verificationExpiresAt) > ctx.now()))) return null;
       const verificationToken = token();
       const createdAt = ctx.now();
       const verificationExpiresAt = new Date(createdAt.getTime() + 24 * 3600000);
       const subscription = { _id: existing?._id ?? new ObjectId(), projectId: project._id, email: body.email, serviceIds,
-        verificationTokenHash: hashToken(verificationToken), verificationExpiresAt, createdAt };
+        verificationTokenHash: hashToken(verificationToken), verificationExpiresAt, createdAt, verificationSimulation: simulation, generationId: new ObjectId() };
       if (existing) {
         await ctx.db.collection('subscriptions').updateOne({ _id: existing._id }, {
-          $set: { serviceIds, verificationTokenHash: subscription.verificationTokenHash, verificationExpiresAt, renewedAt: createdAt },
+          $set: { serviceIds, verificationTokenHash: subscription.verificationTokenHash, verificationExpiresAt, renewedAt: createdAt, verificationSimulation: simulation, generationId: subscription.generationId },
+          $unset: { revokedAt: '', verifiedAt: '', verificationMethod: '' },
         }, { session });
         await ctx.db.collection('simulatedMail').deleteMany({ subscriptionId: existing._id, kind: 'subscription-verification' }, { session });
       } else await ctx.db.collection('subscriptions').insertOne(subscription, { session });
-      await ctx.db.collection('simulatedMail').insertOne({ projectId: project._id, subscriptionId: subscription._id, recipient: body.email,
+      const link = `${ctx.config.publicBaseUrl}/status/${encodeURIComponent(project.slug)}#verify=${encodeURIComponent(verificationToken)}`;
+      const content = emailContent(`Confirm updates from ${project.name}`, ['You asked to receive incident updates for selected services on this status page.', 'Confirm your email address to start receiving updates. This link expires in 24 hours.'], { label: 'Confirm subscription', url: link }, 'If you did not request these updates, ignore this email. You will not be subscribed until you confirm.');
+      await queueEmail(ctx, session, { kind: 'subscription-verification', to: body.email, subject: `Confirm your ${project.name} subscription`, ...content,
+        dedupeKey: `subscription-verify:${subscription._id}:${hashToken(verificationToken)}`, projectId: project._id, subscriptionId: subscription._id, subscriptionTokenHash: subscription.verificationTokenHash, expiresAt: verificationExpiresAt });
+      if (simulation) await ctx.db.collection('simulatedMail').insertOne({ projectId: project._id, subscriptionId: subscription._id, recipient: body.email,
         kind: 'subscription-verification', token: verificationToken, expiresAt: verificationExpiresAt, createdAt, simulation: true }, { session });
       return { verificationToken, expiresAt: verificationExpiresAt };
     };
@@ -90,24 +98,35 @@ export function publicRouter(ctx: AppContext): Router {
       if ((error as { code?: number }).code !== 11000) throw error;
       result = await transaction(ctx, createSubscription);
     }
-    res.status(202).json({ accepted: true, simulation: true, message: 'Verification was queued in the simulated inbox. No real email was sent.',
-      ...(result && ctx.config.env !== 'production' ? { simulatedEmail: result, notice: 'Development simulation only; this does not prove ownership of a real mailbox.' } : {}) });
+    res.status(202).json({ accepted: true, simulation, message: simulation ? 'Verification was queued in the simulated inbox. No real email was sent.' : 'If this address needs verification, a confirmation email is on its way. Check your inbox and spam folder.',
+      ...(result && simulation ? { simulatedEmail: result, notice: 'Development simulation only; this does not prove ownership of a real mailbox.' } : {}) });
   });
   router.post('/subscriptions/verify', async (req, res) => {
     const body = verifySchema.parse(req.body);
-    if (!ctx.config.simulations) return fail(409, 'SIMULATIONS_DISABLED', 'Simulated verification is disabled.');
+    let simulation = false;
     await transaction(ctx, async session => {
       const subscription = await ctx.db.collection('subscriptions').findOne({ verificationTokenHash: hashToken(body.token), verificationExpiresAt: { $gt: ctx.now() }, verifiedAt: { $exists: false } }, { session });
       if (!subscription) return fail(400, 'INVALID_VERIFICATION', 'Verification link is invalid or expired.');
+      simulation = subscription.verificationSimulation ?? true;
+      if (simulation && emailMode(ctx) !== 'simulation') return fail(400, 'INVALID_VERIFICATION', 'This development verification link cannot be used here. Request a new confirmation email.');
       const project = await ctx.db.collection('projects').findOne({ _id: subscription.projectId, publicEnabled: true, archivedAt: { $exists: false } }, { session });
       const visibleCount = await ctx.db.collection('services').countDocuments({ _id: { $in: subscription.serviceIds }, projectId: subscription.projectId, publicVisible: true, archivedAt: { $exists: false } }, { session });
       if (!project || visibleCount !== subscription.serviceIds.length) return fail(409, 'SUBSCRIPTION_UNAVAILABLE', 'The selected public subscription is no longer available.');
       await ctx.db.collection('subscriptions').updateOne({ _id: subscription._id }, {
-        $set: { verifiedAt: ctx.now(), verificationMethod: 'simulation' }, $unset: { verificationTokenHash: '', verificationExpiresAt: '' },
+        $set: { verifiedAt: ctx.now(), verificationMethod: simulation ? 'simulation' : 'email' }, $unset: { verificationTokenHash: '', verificationExpiresAt: '' },
       }, { session });
       await ctx.db.collection('simulatedMail').deleteMany({ subscriptionId: subscription._id, kind: 'subscription-verification' }, { session });
     });
-    res.json({ verified: true, simulation: true, message: 'Simulated verification completed; no real mailbox ownership was verified.' });
+    res.json({ verified: true, simulation, message: simulation ? 'Simulated verification completed; no real mailbox ownership was verified.' : 'Your email is confirmed. You will now receive updates for your selected services.' });
+  });
+  router.post('/subscriptions/unsubscribe', async (req, res) => {
+    const body = verifySchema.parse(req.body);
+    await transaction(ctx, async session => {
+      const notification = await ctx.db.collection('notifications').findOne({ unsubscribeTokenHash: hashToken(body.token) }, { session });
+      if (!notification) return fail(400, 'INVALID_UNSUBSCRIBE', 'This unsubscribe link is invalid.');
+      await ctx.db.collection('subscriptions').updateOne({ _id: notification.subscriptionId, generationId: notification.subscriptionGenerationId }, { $set: { revokedAt: ctx.now() } }, { session });
+    });
+    res.json({ unsubscribed: true, message: 'You have unsubscribed from this status page. You will not receive further incident updates.' });
   });
   return router;
 }

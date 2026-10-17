@@ -2,6 +2,7 @@ const $ = selector => document.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const slug = encodeURIComponent(decodeURIComponent(location.pathname.split('/').filter(Boolean).at(-1)));
 const base = `/api/public/projects/${slug}`;
+const simulation = document.body.dataset.emailMode === 'simulation';
 const labels = { operational: 'Operational', degraded: 'Degraded', outage: 'Outage', unknown: 'Awaiting checks', investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved' };
 const date = value => value ? new Date(value).toLocaleString() : 'Awaiting first check';
 const badge = status => `<span class="badge ${Object.hasOwn(labels, status) ? status : 'unknown'}">${escape(labels[status] || status)}</span>`;
@@ -42,19 +43,43 @@ $('#subscribe-form').addEventListener('submit', async event => {
   try {
     if (!selected.size) throw new Error('Choose at least one service to follow.');
     const result = await request(`${base}/subscriptions`, { email: new FormData(event.currentTarget).get('email'), serviceIds: [...selected] });
-    message('Subscription requested. This project uses a simulated inbox; no email was sent. Ask the project owner for your verification code.');
+    message(simulation ? 'Subscription requested in development simulation. No email was sent; ask the project owner for your verification code.' : 'Check your inbox for a verification email. Confirm your address to start receiving updates. The message may take a moment to arrive; check your spam folder too.');
     if (result.simulatedEmail) { $('#verify-form [name="token"]').value = result.simulatedEmail.verificationToken; message('Subscription requested. Your development verification code is filled in below. Complete simulated verification to activate it.'); }
-    $('#verify-form').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
+    if (result.simulatedEmail) $('#verify-form').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
   } catch (error) { message(error.message, true); }
   finally { button.disabled = false; }
 });
 $('#verify-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = event.currentTarget.querySelector('button'); button.disabled = true;
-  try { await request('/api/public/subscriptions/verify', { token: new FormData(event.currentTarget).get('token') }); event.target.reset(); message('Subscription activated through simulation. Real mailbox ownership has not been verified.'); }
+  try { await request('/api/public/subscriptions/verify', { token: new FormData(event.currentTarget).get('token') }); event.target.reset(); message(simulation ? 'Subscription activated through simulation. Real mailbox ownership has not been verified.' : 'Your email is confirmed. You’ll now receive updates for the services you selected.'); }
   catch (error) { message(error.message, true); }
   finally { button.disabled = false; }
 });
 $('#close-modal').addEventListener('click', () => $('#modal').close());
+function openEmailLink() {
+const emailLink = new URLSearchParams(location.hash.slice(1));
+if (emailLink.has('verify') || emailLink.has('unsubscribe')) history.replaceState(null, '', location.pathname + location.search);
+if (emailLink.has('verify')) {
+  $('#verify-form [name="token"]').value = emailLink.get('verify');
+  message('Your verification link is ready. Select Confirm subscription below to start receiving service updates.');
+  $('#verify-form').scrollIntoView({ block: 'center' });
+  $('#verify-form button').focus({ preventScroll: true });
+}
+if (emailLink.has('unsubscribe')) {
+  $('#modal-title').textContent = 'Unsubscribe from updates';
+  $('#modal-body').innerHTML = '<p class="muted">You can stop email updates for this subscription. You can subscribe again from this status page whenever you like.</p><form id="unsubscribe-form"><p class="form-error" role="alert" hidden></p><div class="form-actions"><button type="button" class="button" id="keep-subscription">Keep my subscription</button><button type="submit" class="button danger">Unsubscribe</button></div></form>';
+  $('#modal').showModal();
+  $('#keep-subscription').addEventListener('click', () => $('#modal').close());
+  $('#unsubscribe-form').addEventListener('submit', async event => {
+    event.preventDefault(); const submit = event.currentTarget.querySelector('[type="submit"]'); submit.disabled = true;
+    try { await request('/api/public/subscriptions/unsubscribe', { token: emailLink.get('unsubscribe') }); $('#modal').close(); message('You’re unsubscribed. You won’t receive further emails for this subscription.'); }
+    catch (error) { const target = $('#unsubscribe-form .form-error'); target.textContent = error.message; target.hidden = false; }
+    finally { submit.disabled = false; }
+  });
+}
+}
+openEmailLink();
+addEventListener('hashchange', openEmailLink);
 document.addEventListener('click', async event => {
   const button = event.target.closest('[data-incident], [data-history], [data-page], [data-refresh]'); if (!button || button.disabled) return;
   button.disabled = true;

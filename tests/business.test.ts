@@ -154,14 +154,14 @@ test('subscriptions normalize email, hash tokens, reject private selections, rec
   assert.equal(await ctx.db.collection('notifications').countDocuments({ projectId: f.projectId }), 1);
 });
 
-test('production simulation keeps verification tokens in owner-only inbox and expiry rejects verification', async () => {
+test('local simulation restricts inbox access and expiry rejects verification tokens', async () => {
   const f = await fixture();
   const priorEnv = ctx.config.env;
-  ctx.config.env = 'production';
+  ctx.config.env = 'development';
   try {
     const signup = await request('POST', `${f.publicPath}/subscriptions`, { email: 'prod@example.test', serviceIds: [String(f.service._id)] });
     assert.equal(signup.status, 202);
-    assert.equal(signup.body.simulatedEmail, undefined);
+    assert.ok(signup.body.simulatedEmail);
     assert.equal((await request('GET', `${f.path}/simulated-mail`)).status, 401);
     assert.equal((await request('GET', `${f.path}/simulated-mail`, undefined, f.credentials.viewer)).status, 403);
     const inbox = await request('GET', `${f.path}/simulated-mail`, undefined, f.credentials.owner);
@@ -172,7 +172,7 @@ test('production simulation keeps verification tokens in owner-only inbox and ex
     assert.equal((await request('POST', '/api/public/subscriptions/verify', { token: verificationToken })).status, 400);
     const renewed = await request('POST', `${f.publicPath}/subscriptions`, { email: 'prod@example.test', serviceIds: [String(f.service._id)] });
     assert.equal(renewed.status, 202);
-    assert.equal(renewed.body.simulatedEmail, undefined);
+    assert.ok(renewed.body.simulatedEmail);
     const newInbox = await request('GET', `${f.path}/simulated-mail`, undefined, f.credentials.owner);
     assert.equal(newInbox.body.items.length, 1);
     const newToken = newInbox.body.items[0].token;
@@ -180,6 +180,17 @@ test('production simulation keeps verification tokens in owner-only inbox and ex
     assert.equal((await request('POST', '/api/public/subscriptions/verify', { token: verificationToken })).status, 400);
     assert.equal((await request('POST', '/api/public/subscriptions/verify', { token: newToken })).status, 200);
   } finally { ctx.config.env = priorEnv; }
+});
+
+test('production refuses simulated email even when payment demonstrations remain enabled', async () => {
+  const f = await fixture();
+  const previous = ctx.config.env;
+  ctx.config.env = 'production';
+  try {
+    assert.equal((await request('POST', `${f.publicPath}/subscriptions`, { email: 'prod@example.test', serviceIds: [String(f.service._id)] })).status, 503);
+    assert.equal((await request('GET', `${f.path}/simulated-mail`, undefined, f.credentials.owner)).status, 409);
+    assert.equal(await ctx.db.collection('subscriptions').countDocuments({ projectId: f.projectId }), 0);
+  } finally { ctx.config.env = previous; }
 });
 
 test('alert failures remain undelivered, retry is durable and concurrent delivery and acknowledgement are idempotent', async () => {

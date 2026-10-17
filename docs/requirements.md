@@ -1,5 +1,7 @@
 # Status Pulse — Requirements and acceptance criteria
 
+> Product extension: real email and social identity supersede the original simulation-only email statements below. The original 48 coursework criteria remain traceable in local demonstration mode. Production requires real providers; see the extension requirements at the end.
+
 ## Purpose
 
 Status Pulse is a monitoring platform with a browser dashboard and an HTTP API. Teams register HTTP services, run scheduled checks, calculate availability, investigate incidents, receive and acknowledge alerts, and share selected information through public status pages. Visitors can subscribe to public services. An advanced monitoring plan uses simulated payments only.
@@ -280,3 +282,15 @@ Test groups: **API** = [api.test.ts](../tests/api.test.ts), **Business** = [busi
 ## Delivery status
 
 The [final delivery report](final-delivery.md) separates implementation, executed checks, browser review, and external deployment. A written requirement, existing test, or deployment manifest alone does not prove that its execution passed. The available baseline is this repository; any separate institutional marking rubric should be checked against it before submission.
+
+## Production account and email extension
+
+| ID | Requirement | Verification |
+| --- | --- | --- |
+| EXT-01 | Real invitations, account verification, recovery and public notifications use a durable Resend outbox; disabled email never claims success | Email and authentication integration tests |
+| EXT-02 | Provider failures are retried with bounded attempts and stable idempotency keys; acceptance is distinct from inbox delivery | Outbox concurrency, failure, expiry and provider-response tests |
+| EXT-03 | Google/GitHub sign-in validates state, browser binding and verified identity; existing manual accounts link explicitly | OAuth callback, token validation, account-collision and session tests |
+| EXT-04 | One-use reset and verification links expire; password resets invalidate existing sessions | Authentication tests |
+| EXT-05 | Light/dark/system themes persist; password visibility is accessible; creator credit is configurable | Browser preference and responsive checks |
+| EXT-06 | Public subscription email proves mailbox control; unsubscribe and visibility changes suppress later notifications | Email integration and public workflow tests |
+| EXT-07 | Provider activation instructions are exact and secrets stay outside Git | Configuration tests and connection guide |

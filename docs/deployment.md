@@ -96,6 +96,10 @@ The supplied `render.yaml` declares a Docker web service and a Docker background
 
 Local accounts and demo records are not copied to the hosted database. The worker has no public website URL; its `PUBLIC_BASE_URL` is the API's origin.
 
+## Real email and social sign-in
+
+Follow the [connection guide](email-and-sign-in-setup.md) for verified sender DNS, Resend, Google and GitHub setup using the current Render URL. Email configuration is independent of demonstration payments. Set email settings on both API and worker; social credentials are needed only on the API. No secrets belong in the Blueprint or repository.
+
 ## Administrator access
 
 Register the intended account first. From an operator checkout configured for the same database, run:
@@ -135,13 +139,13 @@ Fill this in only after checking the deployed environment. The isolated demo is 
 | Worker | Persisted scheduled check with timestamp plus worker heartbeat |
 | Persistence | API/worker restart retains data and resumes eligible work |
 | Status and incidents | Failure/recovery, history, override expiry, and explicit lifecycle |
-| Alerts | Failed/successful simulation and separate acknowledgement |
+| Alerts and email | Real provider acceptance/failure, received invitation and subscription verification, unsubscribe, separate acknowledgement |
 | Public visibility | Hidden service/URL/internal-note exclusion and public subscription flow |
 | Plans | Failed payment preserves plan; successful retry/replay activates once |
 | Operations | Restricted administration, useful failure evidence, and safe logs |
 
 ## Operational limits
 
-Simulations remain simulations in production. Public verification responses suppress tokens; the project owner can retrieve demonstration tokens through the protected inbox. Setting `ENABLE_SIMULATIONS=false` disables those flows and does not install a real provider.
+Production never enables simulated email. Without a configured sender and key, email actions report unavailable. Set `EMAIL_MODE=resend` with `EMAIL_FROM` and `RESEND_API_KEY` to send through Resend. The API and worker safely share a leased email outbox. Email status `sent` means provider acceptance, not inbox delivery. Local/test email simulations and payment demonstrations remain clearly labelled.
 
 Hosted operation still needs appropriate backups, restore drills, monitoring, capacity planning, and access controls. A single-node local replica set is not high availability. Application destination validation adds SSRF protection, but hosting egress isolation exists only when it has actually been configured. The current GitHub Actions file defines checks and container-build verification; its presence alone does not prove a remote run or publish an image.

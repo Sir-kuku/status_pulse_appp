@@ -4,7 +4,7 @@ Status Pulse gives a team one place to monitor services, respond to incidents, a
 
 ## From a new account to a monitored service
 
-Create an account, then create a project for a product or group of related services. You become its owner. Add a monitor with a public HTTP or HTTPS address, the expected status range, and a check interval. You can also set how many failures count as an outage and how many successful checks are needed for recovery.
+Create an account with your email and a password, or choose Google/GitHub when the operator has connected those providers. Manual accounts receive a verification email when delivery is configured. You can recover a forgotten password from the sign-in screen. Then create a project for a product or group of related services. You become its owner. Add a monitor with a public HTTP or HTTPS address, the expected status range, and a check interval. You can also set how many failures count as an outage and how many successful checks are needed for recovery.
 
 A new monitor starts as **unknown**. Status Pulse waits for evidence instead of displaying a healthy status before a check has happened. The worker records the HTTP response, latency, and any failure. The dashboard turns those records into service status, a recent-check strip, and a response-time chart.
 
@@ -56,21 +56,25 @@ stateDiagram-v2
 
 Updates can remain in the current state while the team gathers information, but they cannot skip or reverse the sequence. A successful monitoring recovery records evidence; a person still decides when the incident is resolved. Revision checks reject stale edits so one teammate cannot silently overwrite another's update.
 
-Alerts keep two separate facts: whether simulated delivery succeeded and whether a responder acknowledged the alert. Delivery can fail without losing the alert. Automatic attempts are bounded; an owner or responder can retry explicitly. Acknowledgement means someone has taken responsibility, and does not claim that the email arrived or the incident is resolved.
+Alerts keep two separate facts: whether email was accepted by the provider and whether a responder acknowledged the alert. Delivery can fail without losing the alert. Automatic attempts are bounded; an owner or responder can retry explicitly. Acknowledgement means someone has taken responsibility, and does not claim that the email arrived or the incident is resolved.
 
 ## Keeping users informed
 
 Enable public visibility for the project and the monitors you want to share. Visitors open `/status/PROJECT-SLUG` without signing in. They see public service names, statuses, timestamps, incident updates, and status history. Endpoint URLs, internal notes, memberships, and private configuration stay behind the authenticated API.
 
-A visitor selects services, submits an email address, and completes the simulated verification step. In development, a new verification code can be filled into the public form. In production, the owner retrieves it from the protected simulated inbox. Verification expires after 24 hours and can be used once. Public updates produce deduplicated notification records only for verified subscribers whose selected services remain public.
+A visitor selects services, enters an email address and confirms the link sent to their inbox. The link expires after 24 hours and can be used once. Public updates queue emails only for verified subscribers whose selected services remain public. Every incident email includes an unsubscribe link. Removed visibility or a revoked subscription cancels queued messages before sending.
 
-No real email is sent and this flow does not prove mailbox ownership. The public page says so explicitly. It refreshes every 30 seconds when visible and not interrupting the subscription form. Timestamps are shown in the visitor's local timezone.
+Production uses the configured Resend sender. An unconfigured installation explains that email is unavailable. Local demonstrations retain an explicitly labelled simulation for the original assignment. It refreshes every 30 seconds when visible and not interrupting the subscription form. Timestamps are shown in the visitor's local timezone.
 
 ## Working as a team
 
-Owners invite teammates as responders or viewers, share the simulated invitation code, and manage their access from Team. The invitee must sign in with the invited email address before accepting the code. Owners control configuration and plans; responders handle operational actions; viewers inspect information. The server checks each action even if someone bypasses the visible controls.
+Owners verify their own email and invite teammates as responders or viewers from Team. The recipient follows the invitation email, signs in or creates an account with that exact address, and accepts the invitation. Email activity shows queue and provider results without exposing invitation tokens. A sent result means provider acceptance; the provider dashboard contains delivery and bounce details. Owners control configuration and plans; responders handle operational actions; viewers inspect information. The server checks each action even if someone bypasses the visible controls.
 
 Platform administrators are provisioned with the operator command in the README. Their Operations view shows worker heartbeats, failed jobs, delivery failures, and audit events. Administration does not automatically grant access to a project's private data.
+
+## A workspace that feels like yours
+
+Choose light, dark or system appearance from the theme controls. Your browser remembers the choice across the dashboard, account pages, public pages and documentation. Eye buttons let you check a password as you type. Account settings show verification status and let existing users connect Google or GitHub without creating a duplicate account. The footer credits the creator without interrupting the workspace.
 
 ## Trying the advanced plan
 
@@ -82,6 +86,10 @@ Open Project settings and explore the advanced plan. A successful simulated paym
 flowchart TB
     Browser[Team dashboard / public page] --> API[Express API and static assets]
     API --> DB[(MongoDB replica set)]
+    API --> Identity[Google / GitHub sign-in]
+    API --> Mail[Durable email outbox]
+    Worker --> Mail
+    Mail --> Provider[Resend → recipient inbox]
     Worker[Independent scheduler / worker] <--> DB
     Worker --> Endpoint[Public HTTP or HTTPS endpoint]
     Tests[Regression tests and acceptance demo] --> Isolated[(Isolated test replica set)]

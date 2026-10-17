@@ -3,6 +3,7 @@ import { ObjectId, type ClientSession } from 'mongodb';
 import { z } from 'zod';
 import { type AppContext, actor, audit, fail, oid, projectAccess, requireUser, serviceInProject, transaction } from './core.js';
 import { deliverPendingAlerts, notifyPublicIncidentUpdate } from './delivery.js';
+import { emailMode, requireEmailDelivery } from './email.js';
 
 const states = ['investigating', 'identified', 'monitoring', 'resolved'] as const;
 const messageSchema = z.string().trim().min(1).max(5000);
@@ -123,12 +124,13 @@ export function incidentRouter(ctx: AppContext): Router {
   router.post('/:projectId/alerts/:alertId/retry', async (req, res) => {
     const project = await projectAccess(ctx, req, res, ['owner', 'responder']);
     const body = z.object({ simulateFailure: z.boolean().default(false) }).strict().parse(req.body ?? {});
-    if (!ctx.config.simulations) return fail(409, 'SIMULATIONS_DISABLED', 'Simulated delivery is disabled.');
+    requireEmailDelivery(ctx);
+    if (body.simulateFailure && emailMode(ctx) !== 'simulation') return fail(409, 'SIMULATIONS_DISABLED', 'Email failure simulation is only available in local demonstration mode.');
     const alertId = oid(req.params.alertId);
     const alert = await ctx.db.collection('alerts').findOne({ _id: alertId, projectId: project._id });
     if (!alert) return fail(404, 'NOT_FOUND', 'Alert not found.');
     await deliverPendingAlerts(ctx, { alertId, force: true, simulateFailure: body.simulateFailure, limit: 1 });
-    res.json({ simulation: true, alert: await ctx.db.collection('alerts').findOne({ _id: alertId, projectId: project._id }) });
+    res.json({ simulation: emailMode(ctx) === 'simulation', alert: await ctx.db.collection('alerts').findOne({ _id: alertId, projectId: project._id }) });
   });
 
   router.get('/:projectId/payments', async (req, res) => {
@@ -139,12 +141,20 @@ export function incidentRouter(ctx: AppContext): Router {
   });
   router.get('/:projectId/simulated-mail', async (req, res) => {
     const project = await projectAccess(ctx, req, res, ['owner']);
-    if (!ctx.config.simulations) return fail(409, 'SIMULATIONS_DISABLED', 'Simulated email is disabled.');
+    if (emailMode(ctx) !== 'simulation') return fail(409, 'SIMULATIONS_DISABLED', 'Simulated email is disabled.');
     const { limit, offset } = paginationStrict(req.query);
     const items = await ctx.db.collection('simulatedMail').find({ projectId: project._id, expiresAt: { $gt: ctx.now() } }, {
       projection: { _id: 1, kind: 1, recipient: 1, token: 1, expiresAt: 1, createdAt: 1 },
     }).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit).toArray();
     res.json({ items, limit, offset, simulation: true, message: 'Simulated inbox only. No emails were sent and real mailbox ownership is not verified.' });
+  });
+  router.get('/:projectId/email-deliveries', async (req, res) => {
+    const project = await projectAccess(ctx, req, res, ['owner']);
+    const { limit, offset } = paginationStrict(req.query);
+    const items = await ctx.db.collection('emailOutbox').find({ projectId: project._id }, {
+      projection: { _id: 1, kind: 1, to: 1, subject: 1, deliveryState: 1, attempts: 1, createdAt: 1, sentAt: 1, deliveredAt: 1, lastError: 1 },
+    }).sort({ createdAt: -1, _id: -1 }).skip(offset).limit(limit).toArray();
+    res.json({ items, limit, offset, mode: emailMode(ctx) });
   });
   router.post('/:projectId/payments/simulate', async (req, res) => {
     const project = await projectAccess(ctx, req, res, ['owner']);
